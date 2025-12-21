@@ -59,3 +59,4 @@ htmlcov/
 
 # Project specific
 .git/bifurcate-state.json
+.aider*

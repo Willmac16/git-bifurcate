@@ -60,9 +60,6 @@ Found breaking change:
 git clone https://github.com/yourusername/git-bifurcate
 cd git-bifurcate
 pip install -e .
-
-# Or using cargo (Rust - future)
-cargo install git-bifurcate
 ```
 
 ### Basic Usage

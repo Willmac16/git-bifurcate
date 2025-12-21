@@ -81,3 +81,9 @@ warn_unused_configs = true
 disallow_untyped_defs = true
 check_untyped_defs = true
 strict = true
+
+[dependency-groups]
+dev = [
+    "pytest-cov>=7.0.0",
+    "pytest>=9.0.2",
+]
