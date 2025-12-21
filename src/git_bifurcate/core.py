@@ -290,8 +290,7 @@ class BifurcationEngine:
 
         if verbose:
             click.echo(
-                "\nWarning: Isolated change doesn't fail on its own. "
-                "May be an interaction effect."
+                "\nWarning: Isolated change doesn't fail on its own. May be an interaction effect."
             )
 
             if interaction:
