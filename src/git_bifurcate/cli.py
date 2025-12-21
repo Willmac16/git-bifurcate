@@ -106,8 +106,8 @@ def start(commit: str | None, test: str, strategy: str, parent: str | None) -> N
 
             # Display changes
             click.echo("\nChanges to bifurcate:")
-            for i, change in enumerate(file_changes):
-                click.echo(f"  [{i}] {change.file_path} ({change.change_type})")
+            for i, file_change in enumerate(file_changes):
+                click.echo(f"  [{i}] {file_change.file_path} ({file_change.change_type})")
             click.echo()
 
             # First, verify that all changes together reproduce the failure
@@ -119,7 +119,9 @@ def start(commit: str | None, test: str, strategy: str, parent: str | None) -> N
             result = engine._test_changes(file_changes, parent_sha, all_indices)
 
             if result != CommandResult.FAIL:
-                click.echo(f"\nError: Expected test to FAIL with all changes, but got {result.value}")
+                click.echo(
+                    f"\nError: Expected test to FAIL with all changes, but got {result.value}"
+                )
                 click.echo("The commit you're bifurcating should fail tests.")
                 click.echo("Please verify:")
                 click.echo(f"  1. Tests pass at parent commit: {parent_sha[:8]}")
@@ -135,7 +137,9 @@ def start(commit: str | None, test: str, strategy: str, parent: str | None) -> N
             result = engine._test_changes(file_changes, parent_sha, [])
 
             if result != CommandResult.PASS:
-                click.echo(f"\nError: Expected test to PASS with no changes, but got {result.value}")
+                click.echo(
+                    f"\nError: Expected test to PASS with no changes, but got {result.value}"
+                )
                 click.echo("The parent commit should pass tests.")
                 sys.exit(1)
 
@@ -159,20 +163,20 @@ def start(commit: str | None, test: str, strategy: str, parent: str | None) -> N
             click.echo("=" * 60)
             click.echo()
 
-            breaking_change = engine.bifurcate_files(file_changes, parent_sha, verbose=True)
+            breaking_file = engine.bifurcate_files(file_changes, parent_sha, verbose=True)
 
-            if breaking_change:
+            if breaking_file:
                 click.echo()
                 click.echo("=" * 60)
                 click.echo("BREAKING CHANGE FOUND!")
                 click.echo("=" * 60)
                 click.echo()
-                click.echo(f"File: {breaking_change.file_path}")
-                click.echo(f"Type: {breaking_change.change_type}")
+                click.echo(f"File: {breaking_file.file_path}")
+                click.echo(f"Type: {breaking_file.change_type}")
                 click.echo()
                 click.echo("Diff content:")
                 click.echo("-" * 60)
-                click.echo(breaking_change.diff_content)
+                click.echo(breaking_file.diff_content)
                 click.echo("-" * 60)
                 click.echo()
 
@@ -221,8 +225,8 @@ def start(commit: str | None, test: str, strategy: str, parent: str | None) -> N
 
             # Display changes
             click.echo("\nChanges to bifurcate:")
-            for i, change in enumerate(hunk_changes):
-                click.echo(f"  [{i}] {change.file_path}:{change.start_line}-{change.end_line}")
+            for i, hunk_change in enumerate(hunk_changes):
+                click.echo(f"  [{i}] {hunk_change.file_path}:{hunk_change.start_line}-{hunk_change.end_line}")
             click.echo()
 
             # First, verify that all changes together reproduce the failure
@@ -234,7 +238,9 @@ def start(commit: str | None, test: str, strategy: str, parent: str | None) -> N
             result = engine._test_hunk_changes(hunk_changes, parent_sha, commit_sha, all_indices)
 
             if result != CommandResult.FAIL:
-                click.echo(f"\nError: Expected test to FAIL with all changes, but got {result.value}")
+                click.echo(
+                    f"\nError: Expected test to FAIL with all changes, but got {result.value}"
+                )
                 click.echo("The commit you're bifurcating should fail tests.")
                 click.echo("Please verify:")
                 click.echo(f"  1. Tests pass at parent commit: {parent_sha[:8]}")
@@ -250,7 +256,9 @@ def start(commit: str | None, test: str, strategy: str, parent: str | None) -> N
             result = engine._test_hunk_changes(hunk_changes, parent_sha, commit_sha, [])
 
             if result != CommandResult.PASS:
-                click.echo(f"\nError: Expected test to PASS with no changes, but got {result.value}")
+                click.echo(
+                    f"\nError: Expected test to PASS with no changes, but got {result.value}"
+                )
                 click.echo("The parent commit should pass tests.")
                 sys.exit(1)
 
@@ -274,20 +282,22 @@ def start(commit: str | None, test: str, strategy: str, parent: str | None) -> N
             click.echo("=" * 60)
             click.echo()
 
-            breaking_change = engine.bifurcate_hunks(hunk_changes, parent_sha, commit_sha, verbose=True)
+            breaking_hunk = engine.bifurcate_hunks(
+                hunk_changes, parent_sha, commit_sha, verbose=True
+            )
 
-            if breaking_change:
+            if breaking_hunk:
                 click.echo()
                 click.echo("=" * 60)
                 click.echo("BREAKING CHANGE FOUND!")
                 click.echo("=" * 60)
                 click.echo()
-                click.echo(f"File: {breaking_change.file_path}")
-                click.echo(f"Lines: {breaking_change.start_line}-{breaking_change.end_line}")
+                click.echo(f"File: {breaking_hunk.file_path}")
+                click.echo(f"Lines: {breaking_hunk.start_line}-{breaking_hunk.end_line}")
                 click.echo()
                 click.echo("Diff content:")
                 click.echo("-" * 60)
-                click.echo(breaking_change.diff_content)
+                click.echo(breaking_hunk.diff_content)
                 click.echo("-" * 60)
                 click.echo()
 
