@@ -368,3 +368,183 @@ def test_bifurcate_files_empty_changes(
     result = engine.bifurcate_files(changes, "base", verbose=False)
 
     assert result is None
+
+
+def test_bifurcate_files_verbose_output(
+    mock_git: MagicMock, mock_test_runner: MagicMock, capsys: pytest.CaptureFixture[str]
+) -> None:
+    """Test verbose output during bifurcation."""
+    changes = [
+        FileChange("0", "file1.py", "modified", "diff1", ChangeStatus.UNKNOWN),
+        FileChange("1", "file2.py", "modified", "diff2", ChangeStatus.UNKNOWN),
+        FileChange("2", "file3.py", "modified", "diff3", ChangeStatus.UNKNOWN),
+        FileChange("3", "file4.py", "modified", "diff4", ChangeStatus.UNKNOWN),
+    ]
+
+    engine = BifurcationEngine(mock_git, mock_test_runner)
+    mock_git.apply_changes.return_value = True
+
+    def mock_run() -> CommandResult:
+        call_args = mock_git.apply_changes.call_args
+        if call_args:
+            applied_changes = call_args[0][0]
+            applied_ids = {c.id for c in applied_changes}
+            if "2" in applied_ids:
+                return CommandResult.FAIL
+            return CommandResult.PASS
+        return CommandResult.PASS
+
+    mock_test_runner.run.side_effect = mock_run
+
+    # Run with verbose=True
+    result = engine.bifurcate_files(changes, "base", verbose=True)
+
+    assert result is not None
+    assert result.id == "2"
+
+    # Check verbose output
+    captured = capsys.readouterr()
+    assert "Iteration" in captured.out
+    assert "Testing changes" in captured.out
+    assert "Found breaking change" in captured.out
+
+
+def test_bifurcate_files_skip_warning(
+    mock_git: MagicMock, mock_test_runner: MagicMock, capsys: pytest.CaptureFixture[str]
+) -> None:
+    """Test warning message when lower half can't build."""
+    changes = [
+        FileChange("0", "file1.py", "modified", "diff1", ChangeStatus.UNKNOWN),
+        FileChange("1", "file2.py", "modified", "diff2", ChangeStatus.UNKNOWN),
+        FileChange("2", "file3.py", "modified", "diff3", ChangeStatus.UNKNOWN),
+        FileChange("3", "file4.py", "modified", "diff4", ChangeStatus.UNKNOWN),
+    ]
+
+    engine = BifurcationEngine(mock_git, mock_test_runner)
+
+    def mock_apply(applied_changes: list[FileChange], base: str, use_temp_branch: bool = True) -> bool:
+        applied_ids = {c.id for c in applied_changes}
+        # Lower half can't be applied
+        if applied_ids == {"0", "1"}:
+            return False
+        return True
+
+    mock_git.apply_changes.side_effect = mock_apply
+
+    def mock_run() -> CommandResult:
+        call_args = mock_git.apply_changes.call_args
+        if call_args:
+            applied_changes = call_args[0][0]
+            applied_ids = {c.id for c in applied_changes}
+            if "2" in applied_ids:
+                return CommandResult.FAIL
+            return CommandResult.PASS
+        return CommandResult.PASS
+
+    mock_test_runner.run.side_effect = mock_run
+
+    result = engine.bifurcate_files(changes, "base", verbose=True)
+
+    assert result is not None
+
+    # Check warning output
+    captured = capsys.readouterr()
+    assert "skip" in captured.out.lower() or "trying upper half" in captured.out.lower()
+
+
+def test_bifurcate_files_dependency_warning(
+    mock_git: MagicMock, mock_test_runner: MagicMock, capsys: pytest.CaptureFixture[str]
+) -> None:
+    """Test dependency warning when both halves fail to build."""
+    changes = [
+        FileChange("0", "file1.py", "modified", "diff1", ChangeStatus.UNKNOWN),
+        FileChange("1", "file2.py", "modified", "diff2", ChangeStatus.UNKNOWN),
+    ]
+
+    engine = BifurcationEngine(mock_git, mock_test_runner)
+
+    # Both halves fail to apply
+    mock_git.apply_changes.return_value = False
+
+    result = engine.bifurcate_files(changes, "base", verbose=True)
+
+    assert result is None
+
+    # Check error message
+    captured = capsys.readouterr()
+    assert "Too many build failures" in captured.out or "dependency" in captured.out.lower()
+
+
+def test_bifurcate_files_interaction_warning(
+    mock_git: MagicMock, mock_test_runner: MagicMock, capsys: pytest.CaptureFixture[str]
+) -> None:
+    """Test warning when isolated change doesn't fail on its own."""
+    changes = [
+        FileChange("0", "file1.py", "modified", "diff1", ChangeStatus.UNKNOWN),
+    ]
+
+    engine = BifurcationEngine(mock_git, mock_test_runner)
+    mock_git.apply_changes.return_value = True
+
+    # Single change passes but shouldn't
+    mock_test_runner.run.return_value = CommandResult.PASS
+
+    result = engine.bifurcate_files(changes, "base", verbose=True)
+
+    assert result is None
+
+    # Check warning about interaction effect
+    captured = capsys.readouterr()
+    assert "doesn't fail on its own" in captured.out or "interaction" in captured.out.lower()
+
+
+def test_bifurcate_hunks_verbose_output(
+    mock_git: MagicMock, mock_test_runner: MagicMock, capsys: pytest.CaptureFixture[str]
+) -> None:
+    """Test verbose output during hunk bifurcation."""
+    from git_bifurcate.models import HunkChange
+
+    hunks = [
+        HunkChange("0", "file.py", 1, 5, 1, 3, 1, 5, "@@ -1,3 +1,5 @@", ChangeStatus.UNKNOWN),
+        HunkChange("1", "file.py", 6, 10, 4, 3, 6, 5, "@@ -4,3 +6,5 @@", ChangeStatus.UNKNOWN),
+    ]
+
+    engine = BifurcationEngine(mock_git, mock_test_runner)
+    mock_git.apply_hunk_changes.return_value = True
+
+    def mock_run() -> CommandResult:
+        # Second hunk fails
+        return CommandResult.FAIL
+
+    mock_test_runner.run.side_effect = mock_run
+
+    result = engine.bifurcate_hunks(hunks, "base", "bad", verbose=True)
+
+    # Check verbose output
+    captured = capsys.readouterr()
+    assert "Testing hunks" in captured.out or "hunk" in captured.out.lower()
+
+
+def test_bifurcate_hunks_dependency_error(
+    mock_git: MagicMock, mock_test_runner: MagicMock, capsys: pytest.CaptureFixture[str]
+) -> None:
+    """Test dependency error during hunk bifurcation."""
+    from git_bifurcate.models import HunkChange
+
+    hunks = [
+        HunkChange("0", "file.py", 1, 5, 1, 3, 1, 5, "@@ -1,3 +1,5 @@", ChangeStatus.UNKNOWN),
+        HunkChange("1", "file.py", 6, 10, 4, 3, 6, 5, "@@ -4,3 +6,5 @@", ChangeStatus.UNKNOWN),
+    ]
+
+    engine = BifurcationEngine(mock_git, mock_test_runner)
+
+    # Both halves fail to apply
+    mock_git.apply_hunk_changes.return_value = False
+
+    result = engine.bifurcate_hunks(hunks, "base", "bad", verbose=True)
+
+    assert result is None
+
+    # Check error message
+    captured = capsys.readouterr()
+    assert "build failures" in captured.out.lower() or "dependency" in captured.out.lower()

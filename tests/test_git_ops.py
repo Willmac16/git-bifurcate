@@ -396,3 +396,167 @@ def test_apply_changes_multiple(git_repo: Path) -> None:
 
     content2 = (git_repo / "file2.txt").read_text()
     assert content2 == "content2\n"
+
+
+def test_apply_changes_invalid_patch(git_repo: Path) -> None:
+    """Test apply_changes with invalid patch content."""
+    repo = GitRepo(git_repo)
+    parent_sha = create_commit(git_repo, "file.txt", "original\n", "Initial")
+
+    # Create invalid FileChange with malformed diff
+    invalid_change = FileChange(
+        id="0",
+        file_path="file.txt",
+        change_type="modified",
+        diff_content="invalid patch content",
+        status=ChangeStatus.UNKNOWN,
+    )
+
+    # Should fail gracefully
+    success = repo.apply_changes([invalid_change], parent_sha, use_temp_branch=False)
+    assert not success
+
+
+    # Get branch count before
+    result = subprocess.run(
+        ["git", "branch"], cwd=git_repo, capture_output=True, text=True, check=True
+    )
+    initial_branches = len([b for b in result.stdout.split("\n") if b.strip()])
+
+    # Create invalid change
+    invalid_change = FileChange(
+        id="0",
+        file_path="file.txt",
+        change_type="modified",
+        diff_content="invalid patch",
+        status=ChangeStatus.UNKNOWN,
+    )
+
+    # Apply with temp branch should fail and clean up
+    success = repo.apply_changes([invalid_change], parent_sha, use_temp_branch=True)
+    assert not success
+
+    # Check branch count after - should be same (cleanup worked)
+    result = subprocess.run(
+        ["git", "branch"], cwd=git_repo, capture_output=True, text=True, check=True
+    )
+    final_branches = len([b for b in result.stdout.split("\n") if b.strip()])
+    assert final_branches == initial_branches
+
+
+def test_apply_hunk_changes_basic(git_repo: Path) -> None:
+    """Test applying hunk changes."""
+    from git_bifurcate.parser import parse_hunk_changes
+
+    repo = GitRepo(git_repo)
+
+    # Create file with multiple functions
+    content = """def func1():
+    return 1
+
+
+def func2():
+    return 2
+
+
+def func3():
+    return 3
+"""
+    parent_sha = create_commit(git_repo, "code.py", content, "Initial")
+
+    # Modify all functions
+    modified = """def func1():
+    # Modified
+    return 10
+
+
+def func2():
+    # Modified
+    return 20
+
+
+def func3():
+    # Modified
+    return 30
+"""
+    bad_sha = create_commit(git_repo, "code.py", modified, "Modify all")
+
+    # Parse hunks
+    diff = repo.get_diff(bad_sha, parent_sha)
+    hunks = parse_hunk_changes(diff)
+
+    assert len(hunks) >= 1
+
+    # Apply all hunks
+    success = repo.apply_hunk_changes(hunks, parent_sha, bad_sha, use_temp_branch=False)
+    assert success
+
+
+def test_apply_hunk_changes_empty_list(git_repo: Path) -> None:
+    """Test applying empty hunk list."""
+    repo = GitRepo(git_repo)
+    parent_sha = create_commit(git_repo, "file.txt", "content\n", "Initial")
+
+    # Empty list should succeed (no-op)
+    success = repo.apply_hunk_changes([], parent_sha, parent_sha, use_temp_branch=False)
+    assert success
+
+
+def test_apply_hunk_changes_missing_file_header(git_repo: Path, monkeypatch: pytest.MonkeyPatch) -> None:
+    """Test apply_hunk_changes when file header extraction fails."""
+    from git_bifurcate.models import HunkChange
+
+    repo = GitRepo(git_repo)
+    parent_sha = create_commit(git_repo, "file.txt", "content\n", "Initial")
+
+    # Create a hunk change
+    hunk = HunkChange(
+        id="0",
+        file_path="file.txt",
+        start_line=1,
+        end_line=2,
+        original_start=1,
+        original_length=1,
+        new_start=1,
+        new_length=2,
+        diff_content="@@ -1 +1,2 @@\n content\n+more",
+        status=ChangeStatus.UNKNOWN,
+    )
+
+    # Mock _extract_file_header to return None (simulating failure)
+    def mock_extract(self, full_diff: str, file_path: str) -> str | None:
+        return None
+
+    monkeypatch.setattr(GitRepo, "_extract_file_header", mock_extract)
+
+    # Should fail gracefully
+    success = repo.apply_hunk_changes([hunk], parent_sha, parent_sha, use_temp_branch=False)
+    assert not success
+
+
+def test_extract_file_header_found(git_repo: Path) -> None:
+    """Test _extract_file_header successfully finds header."""
+    repo = GitRepo(git_repo)
+
+    parent_sha = create_commit(git_repo, "test.txt", "original\n", "Initial")
+    bad_sha = create_commit(git_repo, "test.txt", "modified\n", "Modified")
+
+    diff = repo.get_diff(bad_sha, parent_sha)
+    header = repo._extract_file_header(diff, "test.txt")
+
+    assert header is not None
+    assert "diff --git" in header
+    assert "test.txt" in header
+
+
+def test_extract_file_header_not_found(git_repo: Path) -> None:
+    """Test _extract_file_header when file not in diff."""
+    repo = GitRepo(git_repo)
+
+    parent_sha = create_commit(git_repo, "test.txt", "original\n", "Initial")
+    bad_sha = create_commit(git_repo, "test.txt", "modified\n", "Modified")
+
+    diff = repo.get_diff(bad_sha, parent_sha)
+    header = repo._extract_file_header(diff, "nonexistent.txt")
+
+    assert header is None
