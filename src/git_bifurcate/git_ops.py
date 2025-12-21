@@ -120,6 +120,14 @@ class GitRepo:
         """
         try:
             self.repo.git.checkout(ref)
+            # Keep submodules in sync with checked out ref when present
+            gitmodules = self.repo_path / ".gitmodules"
+            if gitmodules.exists():
+                try:
+                    self.repo.git.submodule("update", "--init", "--recursive", "--checkout")
+                except git.GitCommandError:
+                    # Best-effort: submodule update failures should not crash checkout
+                    pass
         except git.GitCommandError as e:
             msg = f"Failed to checkout {ref}: {e}"
             raise GitOperationError(msg) from e
@@ -249,11 +257,29 @@ class GitRepo:
             except GitOperationError:
                 return False
 
-        # Combine patches
-        combined_patch = "\n".join(change.diff_content for change in changes)
+        # Separate submodule changes so we can update gitlinks explicitly
+        submodule_changes = [c for c in changes if c.change_type == "submodule"]
+        normal_changes = [c for c in changes if c.change_type != "submodule"]
+
+        # Apply submodule updates first (they don't participate in textual patching)
+        if submodule_changes:
+            submodule_success = self._apply_submodule_changes(submodule_changes)
+            if not submodule_success:
+                if use_temp_branch:
+                    try:
+                        self.repo.git.checkout(original_ref, force=True)
+                        self.delete_branch(branch_name)
+                    except git.GitCommandError:
+                        pass
+                return False
+
+        # Combine patches for non-submodule changes
+        combined_patch = "\n".join(change.diff_content for change in normal_changes)
 
         # Try to apply
-        success = self.apply_patch(combined_patch)
+        success = True
+        if combined_patch.strip():
+            success = self.apply_patch(combined_patch)
 
         if not success and use_temp_branch:
             # Clean up failed temp branch
@@ -265,6 +291,72 @@ class GitRepo:
                 pass
 
         return success
+
+    def _apply_submodule_changes(self, submodule_changes: list[FileChange]) -> bool:
+        """Apply submodule gitlink updates.
+
+        Args:
+            submodule_changes: Changes that represent submodule gitlinks.
+
+        Returns:
+            True if all submodule updates were applied and staged.
+        """
+        for change in submodule_changes:
+            new_sha = self._extract_submodule_commit(change.diff_content)
+            if not new_sha:
+                return False
+
+            submodule_path = self.repo_path / change.file_path
+
+            # Ensure submodule exists
+            init_cmd = subprocess.run(
+                ["git", "submodule", "update", "--init", "--recursive", "--", change.file_path],
+                cwd=self.repo_path,
+                capture_output=True,
+                text=True,
+                check=False,
+            )
+            if init_cmd.returncode != 0:
+                return False
+
+            # Fetch best-effort; ignore failures to keep offline compatibility
+            subprocess.run(
+                ["git", "-C", str(submodule_path), "fetch", "--all"],
+                capture_output=True,
+                text=True,
+                check=False,
+            )
+
+            checkout_cmd = subprocess.run(
+                ["git", "-C", str(submodule_path), "checkout", new_sha],
+                capture_output=True,
+                text=True,
+                check=False,
+            )
+            if checkout_cmd.returncode != 0:
+                return False
+
+            add_cmd = subprocess.run(
+                ["git", "add", change.file_path],
+                cwd=self.repo_path,
+                capture_output=True,
+                text=True,
+                check=False,
+            )
+            if add_cmd.returncode != 0:
+                return False
+
+        return True
+
+    @staticmethod
+    def _extract_submodule_commit(diff_content: str) -> str | None:
+        """Extract the new submodule commit SHA from diff content."""
+
+        for line in diff_content.split("\n"):
+            if line.startswith("+Subproject commit "):
+                return line.replace("+Subproject commit ", "").strip()
+
+        return None
 
     def apply_hunk_changes(
         self,

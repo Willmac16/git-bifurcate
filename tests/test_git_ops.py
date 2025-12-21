@@ -9,6 +9,7 @@ import pytest
 
 from git_bifurcate.git_ops import GitOperationError, GitRepo
 from git_bifurcate.models import ChangeStatus, FileChange
+from git_bifurcate.parser import parse_file_changes
 
 
 def create_commit(repo_path: Path, filename: str, content: str, message: str) -> str:
@@ -553,3 +554,98 @@ def test_extract_file_header_not_found(git_repo: Path) -> None:
     header = repo._extract_file_header(diff, "nonexistent.txt")
 
     assert header is None
+
+
+def test_apply_changes_submodule(git_repo: Path, temp_dir: Path) -> None:
+    """Test applying submodule gitlink updates."""
+    sub_repo = temp_dir / "sub_repo"
+    sub_repo.mkdir()
+
+    subprocess.run(["git", "init"], cwd=sub_repo, check=True, capture_output=True)
+    subprocess.run(["git", "config", "user.name", "Test User"], cwd=sub_repo, check=True)
+    subprocess.run(["git", "config", "user.email", "test@example.com"], cwd=sub_repo, check=True)
+
+    # Initial commit
+    (sub_repo / "dep.txt").write_text("v1\n")
+    subprocess.run(["git", "add", "dep.txt"], cwd=sub_repo, check=True, capture_output=True)
+    subprocess.run(["git", "commit", "-m", "Initial dep"], cwd=sub_repo, check=True)
+    initial_sha = (
+        subprocess.run(
+            ["git", "rev-parse", "HEAD"], cwd=sub_repo, check=True, capture_output=True, text=True
+        )
+        .stdout.strip()
+    )
+
+    # Add submodule at initial commit (allow local file transport explicitly)
+    subprocess.run(
+        ["git", "-c", "protocol.file.allow=always", "submodule", "add", str(sub_repo), "vendor/lib"],
+        cwd=git_repo,
+        check=True,
+        capture_output=True,
+    )
+    subprocess.run(["git", "commit", "-am", "Add submodule"], cwd=git_repo, check=True)
+    parent_sha = (
+        subprocess.run(
+            ["git", "rev-parse", "HEAD"], cwd=git_repo, check=True, capture_output=True, text=True
+        )
+        .stdout.strip()
+    )
+
+    # Create new commit in the submodule clone
+    submodule_clone = git_repo / "vendor/lib"
+    subprocess.run(
+        ["git", "-C", str(submodule_clone), "config", "user.name", "Test User"], check=True
+    )
+    subprocess.run(
+        ["git", "-C", str(submodule_clone), "config", "user.email", "test@example.com"], check=True
+    )
+
+    (submodule_clone / "dep.txt").write_text("v2\n")
+    subprocess.run(
+        ["git", "-C", str(submodule_clone), "add", "dep.txt"], check=True, capture_output=True
+    )
+    subprocess.run(
+        ["git", "-C", str(submodule_clone), "commit", "-m", "Update dep"], check=True
+    )
+    new_sha = (
+        subprocess.run(
+            ["git", "-C", str(submodule_clone), "rev-parse", "HEAD"],
+            check=True,
+            capture_output=True,
+            text=True,
+        )
+        .stdout.strip()
+    )
+    assert new_sha != initial_sha
+
+    subprocess.run(["git", "add", "vendor/lib"], cwd=git_repo, check=True)
+    subprocess.run(["git", "commit", "-m", "Update submodule"], cwd=git_repo, check=True)
+    bad_sha = (
+        subprocess.run(
+            ["git", "rev-parse", "HEAD"], cwd=git_repo, check=True, capture_output=True, text=True
+        )
+        .stdout.strip()
+    )
+
+    repo = GitRepo(git_repo)
+    diff = repo.get_diff(bad_sha, parent_sha)
+    changes = parse_file_changes(diff)
+
+    assert len(changes) == 1
+    assert changes[0].change_type == "submodule"
+
+    repo.reset_hard(parent_sha)
+
+    success = repo.apply_changes(changes, parent_sha, use_temp_branch=False)
+
+    assert success
+    current_sha = (
+        subprocess.run(
+            ["git", "-C", str(submodule_clone), "rev-parse", "HEAD"],
+            check=True,
+            capture_output=True,
+            text=True,
+        )
+        .stdout.strip()
+    )
+    assert current_sha == new_sha
