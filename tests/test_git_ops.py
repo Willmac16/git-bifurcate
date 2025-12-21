@@ -569,27 +569,29 @@ def test_apply_changes_submodule(git_repo: Path, temp_dir: Path) -> None:
     (sub_repo / "dep.txt").write_text("v1\n")
     subprocess.run(["git", "add", "dep.txt"], cwd=sub_repo, check=True, capture_output=True)
     subprocess.run(["git", "commit", "-m", "Initial dep"], cwd=sub_repo, check=True)
-    initial_sha = (
-        subprocess.run(
-            ["git", "rev-parse", "HEAD"], cwd=sub_repo, check=True, capture_output=True, text=True
-        )
-        .stdout.strip()
-    )
+    initial_sha = subprocess.run(
+        ["git", "rev-parse", "HEAD"], cwd=sub_repo, check=True, capture_output=True, text=True
+    ).stdout.strip()
 
     # Add submodule at initial commit (allow local file transport explicitly)
     subprocess.run(
-        ["git", "-c", "protocol.file.allow=always", "submodule", "add", str(sub_repo), "vendor/lib"],
+        [
+            "git",
+            "-c",
+            "protocol.file.allow=always",
+            "submodule",
+            "add",
+            str(sub_repo),
+            "vendor/lib",
+        ],
         cwd=git_repo,
         check=True,
         capture_output=True,
     )
     subprocess.run(["git", "commit", "-am", "Add submodule"], cwd=git_repo, check=True)
-    parent_sha = (
-        subprocess.run(
-            ["git", "rev-parse", "HEAD"], cwd=git_repo, check=True, capture_output=True, text=True
-        )
-        .stdout.strip()
-    )
+    parent_sha = subprocess.run(
+        ["git", "rev-parse", "HEAD"], cwd=git_repo, check=True, capture_output=True, text=True
+    ).stdout.strip()
 
     # Create new commit in the submodule clone
     submodule_clone = git_repo / "vendor/lib"
@@ -604,28 +606,20 @@ def test_apply_changes_submodule(git_repo: Path, temp_dir: Path) -> None:
     subprocess.run(
         ["git", "-C", str(submodule_clone), "add", "dep.txt"], check=True, capture_output=True
     )
-    subprocess.run(
-        ["git", "-C", str(submodule_clone), "commit", "-m", "Update dep"], check=True
-    )
-    new_sha = (
-        subprocess.run(
-            ["git", "-C", str(submodule_clone), "rev-parse", "HEAD"],
-            check=True,
-            capture_output=True,
-            text=True,
-        )
-        .stdout.strip()
-    )
+    subprocess.run(["git", "-C", str(submodule_clone), "commit", "-m", "Update dep"], check=True)
+    new_sha = subprocess.run(
+        ["git", "-C", str(submodule_clone), "rev-parse", "HEAD"],
+        check=True,
+        capture_output=True,
+        text=True,
+    ).stdout.strip()
     assert new_sha != initial_sha
 
     subprocess.run(["git", "add", "vendor/lib"], cwd=git_repo, check=True)
     subprocess.run(["git", "commit", "-m", "Update submodule"], cwd=git_repo, check=True)
-    bad_sha = (
-        subprocess.run(
-            ["git", "rev-parse", "HEAD"], cwd=git_repo, check=True, capture_output=True, text=True
-        )
-        .stdout.strip()
-    )
+    bad_sha = subprocess.run(
+        ["git", "rev-parse", "HEAD"], cwd=git_repo, check=True, capture_output=True, text=True
+    ).stdout.strip()
 
     repo = GitRepo(git_repo)
     diff = repo.get_diff(bad_sha, parent_sha)
@@ -639,13 +633,10 @@ def test_apply_changes_submodule(git_repo: Path, temp_dir: Path) -> None:
     success = repo.apply_changes(changes, parent_sha, use_temp_branch=False)
 
     assert success
-    current_sha = (
-        subprocess.run(
-            ["git", "-C", str(submodule_clone), "rev-parse", "HEAD"],
-            check=True,
-            capture_output=True,
-            text=True,
-        )
-        .stdout.strip()
-    )
+    current_sha = subprocess.run(
+        ["git", "-C", str(submodule_clone), "rev-parse", "HEAD"],
+        check=True,
+        capture_output=True,
+        text=True,
+    ).stdout.strip()
     assert current_sha == new_sha
