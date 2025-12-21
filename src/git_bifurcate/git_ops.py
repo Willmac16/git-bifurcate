@@ -165,6 +165,10 @@ class GitRepo:
             True if patch applied successfully, False otherwise.
         """
         try:
+            # Ensure patch ends with newline (git requires it)
+            if not patch.endswith("\n"):
+                patch = patch + "\n"
+
             # Use git apply with --index to stage changes
             result = subprocess.run(
                 ["git", "apply", "--index"],
