@@ -107,6 +107,13 @@ Line: `value2 = 99`
 Expected: `value2 = 2`
 """)
 
+    # Commit the metadata file
+    run_git(["add", "FIXTURE_INFO.md"], repo_path)
+    run_git(["commit", "-m", "Add fixture metadata"], repo_path)
+
+    # Tag the metadata commit for easy reset
+    run_git(["tag", "-f", "fixture-head"], repo_path)
+
 
 def setup_multiple_files_fixture(fixtures_dir: Path) -> None:
     """Create fixture: 5 files modified, file 3 breaks tests.
@@ -197,6 +204,13 @@ Line: `return "BROKEN"`
 Expected: `return "file3"`
 """)
 
+    # Commit the metadata file
+    run_git(["add", "FIXTURE_INFO.md"], repo_path)
+    run_git(["commit", "-m", "Add fixture metadata"], repo_path)
+
+    # Tag the metadata commit for easy reset
+    run_git(["tag", "-f", "fixture-head"], repo_path)
+
 
 def setup_hunk_level_fixture(fixtures_dir: Path) -> None:
     """Create fixture: Single file, multiple hunks, one hunk breaks.
@@ -214,15 +228,33 @@ def setup_hunk_level_fixture(fixtures_dir: Path) -> None:
     run_git(["config", "user.email", "test@example.com"], repo_path)
     run_git(["config", "commit.gpgsign", "false"], repo_path)
 
-    # Create initial file
+    # Create initial file with lots of spacing to create separate hunks
     (repo_path / "calculator.py").write_text("""def add(a, b):
     return a + b
+
+
+# ============================================================
+# Subtraction operations
+# ============================================================
+
 
 def subtract(a, b):
     return a - b
 
+
+# ============================================================
+# Multiplication operations
+# ============================================================
+
+
 def multiply(a, b):
     return a * b
+
+
+# ============================================================
+# Division operations
+# ============================================================
+
 
 def divide(a, b):
     return a / b
@@ -257,15 +289,33 @@ print("All tests passed!")
     result = a + b
     return result
 
+
+# ============================================================
+# Subtraction operations
+# ============================================================
+
+
 def subtract(a, b):
     # Updated implementation
     result = a - b
     return result
 
+
+# ============================================================
+# Multiplication operations
+# ============================================================
+
+
 def multiply(a, b):
     # BUGGY implementation
     result = a + b  # Oops, should be a * b
     return result
+
+
+# ============================================================
+# Division operations
+# ============================================================
+
 
 def divide(a, b):
     # Updated implementation
@@ -309,6 +359,13 @@ Function: `multiply(a, b)`
 Line: `result = a + b  # Oops, should be a * b`
 Expected: `result = a * b`
 """)
+
+    # Commit the metadata file
+    run_git(["add", "FIXTURE_INFO.md"], repo_path)
+    run_git(["commit", "-m", "Add fixture metadata"], repo_path)
+
+    # Tag the metadata commit for easy reset
+    run_git(["tag", "-f", "fixture-head"], repo_path)
 
 
 def main() -> None:

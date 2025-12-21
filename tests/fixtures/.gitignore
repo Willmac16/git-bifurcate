@@ -1,0 +1,3 @@
+# Ignore git repositories created by setup_fixtures.py
+*/.git/
+*/__pycache__/
