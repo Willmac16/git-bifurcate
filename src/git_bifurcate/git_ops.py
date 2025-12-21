@@ -226,7 +226,15 @@ class GitRepo:
         Returns:
             True if changes applied successfully, False otherwise.
         """
+        original_ref = None
         if use_temp_branch:
+            # Save current branch or HEAD to restore on failure
+            try:
+                original_ref = self.repo.head.ref.name
+            except TypeError:
+                # Detached HEAD - save commit SHA
+                original_ref = self.repo.head.commit.hexsha
+
             # Create temp branch
             import uuid
 
@@ -250,9 +258,10 @@ class GitRepo:
         if not success and use_temp_branch:
             # Clean up failed temp branch
             try:
-                self.checkout(base_commit)
+                # Force checkout to discard any failed patch changes
+                self.repo.git.checkout(original_ref, force=True)
                 self.delete_branch(branch_name)
-            except GitOperationError:
+            except git.GitCommandError:
                 pass
 
         return success
@@ -274,7 +283,15 @@ class GitRepo:
         if not hunks:
             return True
 
+        original_ref = None
         if use_temp_branch:
+            # Save current branch or HEAD to restore on failure
+            try:
+                original_ref = self.repo.head.ref.name
+            except TypeError:
+                # Detached HEAD - save commit SHA
+                original_ref = self.repo.head.commit.hexsha
+
             # Create temp branch
             import uuid
 
@@ -307,9 +324,10 @@ class GitRepo:
                 # Can't reconstruct patch without headers
                 if use_temp_branch:
                     try:
-                        self.checkout(base_commit)
+                        # Force checkout to discard any changes
+                        self.repo.git.checkout(original_ref, force=True)
                         self.delete_branch(branch_name)
-                    except GitOperationError:
+                    except git.GitCommandError:
                         pass
                 return False
 
@@ -326,9 +344,10 @@ class GitRepo:
         if not success and use_temp_branch:
             # Clean up failed temp branch
             try:
-                self.checkout(base_commit)
+                # Force checkout to discard any failed patch changes
+                self.repo.git.checkout(original_ref, force=True)
                 self.delete_branch(branch_name)
-            except GitOperationError:
+            except git.GitCommandError:
                 pass
 
         return success
