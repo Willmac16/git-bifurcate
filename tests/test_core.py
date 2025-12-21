@@ -224,6 +224,36 @@ def test_bifurcate_files_first_half_fails(mock_git: MagicMock, mock_test_runner:
     assert result.id == "1"
 
 
+def test_bifurcate_files_reports_interaction(
+    mock_git: MagicMock, mock_test_runner: MagicMock
+) -> None:
+    """Test that interaction detection surfaces minimal failing combo."""
+    changes = [
+        FileChange("0", "file1.py", "modified", "diff1", ChangeStatus.UNKNOWN),
+        FileChange("1", "file2.py", "modified", "diff2", ChangeStatus.UNKNOWN),
+    ]
+
+    engine = BifurcationEngine(mock_git, mock_test_runner)
+    mock_git.apply_changes.return_value = True
+
+    def mock_run() -> CommandResult:
+        call_args = mock_git.apply_changes.call_args
+        if call_args:
+            applied_changes = call_args[0][0]
+            applied_ids = {c.id for c in applied_changes}
+            if applied_ids == {"0", "1"}:
+                return CommandResult.FAIL
+            return CommandResult.PASS
+        return CommandResult.PASS
+
+    mock_test_runner.run.side_effect = mock_run
+
+    result = engine.bifurcate_files(changes, "base", verbose=False)
+
+    assert result is None
+    assert engine.interaction_failure == [0, 1]
+
+
 def test_bifurcate_files_second_half_fails(
     mock_git: MagicMock, mock_test_runner: MagicMock
 ) -> None:

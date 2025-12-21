@@ -32,11 +32,12 @@ def parse_file_changes(diff_text: str) -> list[FileChange]:
         if line.startswith("diff --git"):
             # Save previous file if exists
             if current_path and current_file:
+                detected_type = _detect_change_type(current_type, current_file)
                 changes.append(
                     FileChange(
                         id=str(file_counter),
                         file_path=current_path,
-                        change_type=current_type,
+                        change_type=detected_type,
                         diff_content="\n".join(current_file),
                         status=ChangeStatus.UNKNOWN,
                     )
@@ -64,11 +65,12 @@ def parse_file_changes(diff_text: str) -> list[FileChange]:
 
     # Don't forget last file
     if current_path and current_file:
+        detected_type = _detect_change_type(current_type, current_file)
         changes.append(
             FileChange(
                 id=str(file_counter),
                 file_path=current_path,
-                change_type=current_type,
+                change_type=detected_type,
                 diff_content="\n".join(current_file),
                 status=ChangeStatus.UNKNOWN,
             )
@@ -199,3 +201,14 @@ def get_file_hunks(file_path: str, diff_text: str) -> list[HunkChange]:
     """
     all_hunks = parse_hunk_changes(diff_text)
     return [hunk for hunk in all_hunks if hunk.file_path == file_path]
+
+
+def _detect_change_type(current_type: str, diff_lines: list[str]) -> str:
+    """Infer the change type, including submodule updates."""
+
+    if any("Subproject commit" in line for line in diff_lines) or any(
+        re.search(r"160000", line) for line in diff_lines if line.startswith("index")
+    ):
+        return "submodule"
+
+    return current_type

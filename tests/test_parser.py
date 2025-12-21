@@ -200,6 +200,24 @@ index 1234567..abcdefg 100644
     assert all(h.status == ChangeStatus.UNKNOWN for h in hunks)
 
 
+def test_parse_submodule_change() -> None:
+    """Ensure submodule gitlink updates are detected."""
+    submodule_diff = """diff --git a/vendor/lib b/vendor/lib
+index 1111111..2222222 160000
+--- a/vendor/lib
++++ b/vendor/lib
+@@ -1 +1 @@
+-Subproject commit 1111111111111111111111111111111111111111
++Subproject commit 2222222222222222222222222222222222222222
+"""
+
+    changes = parse_file_changes(submodule_diff)
+
+    assert len(changes) == 1
+    assert changes[0].file_path == "vendor/lib"
+    assert changes[0].change_type == "submodule"
+
+
 def test_parse_complex_diff() -> None:
     """Test parsing diff with multiple files and various change types."""
     complex_diff = """diff --git a/added.py b/added.py
