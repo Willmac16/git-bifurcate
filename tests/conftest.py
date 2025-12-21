@@ -126,3 +126,102 @@ def change_to_original_dir() -> Generator[None, None, None]:
     original_dir = os.getcwd()
     yield
     os.chdir(original_dir)
+
+
+def get_commit_shas(repo_path: Path) -> tuple[str, str]:
+    """Get parent and bad commit SHAs for a fixture repository."""
+
+    # Bad commit with breaking change is HEAD^
+    bad_sha_result = subprocess.run(
+        ["git", "rev-parse", "HEAD^"],
+        cwd=repo_path,
+        capture_output=True,
+        text=True,
+        check=True,
+    )
+    bad_sha = bad_sha_result.stdout.strip()
+
+    # Parent (good) commit is HEAD^^
+    parent_sha_result = subprocess.run(
+        ["git", "rev-parse", "HEAD^^"],
+        cwd=repo_path,
+        capture_output=True,
+        text=True,
+        check=True,
+    )
+    parent_sha = parent_sha_result.stdout.strip()
+
+    return parent_sha, bad_sha
+
+
+@pytest.fixture(scope="session")
+def fixtures_dir() -> Path:
+    """Get fixtures directory path and ensure fixtures are initialized."""
+    fixtures_path = Path(__file__).parent / "fixtures"
+
+    setup_script = fixtures_path / "setup_fixtures.py"
+    if setup_script.exists():
+        simple_git = fixtures_path / "simple-file-break" / ".git"
+        if not simple_git.exists():
+            subprocess.run(
+                ["python3", str(setup_script)],
+                cwd=fixtures_path,
+                check=True,
+                capture_output=True,
+            )
+
+    return fixtures_path
+
+
+@pytest.fixture
+def simple_fixture(fixtures_dir: Path) -> Path:
+    """Get simple file-break fixture path and ensure clean state."""
+    fixture_path = fixtures_dir / "simple-file-break"
+
+    subprocess.run(["git", "checkout", "-f", "master"], cwd=fixture_path, capture_output=True)
+    subprocess.run(
+        ["git", "reset", "--hard", "fixture-head"], cwd=fixture_path, capture_output=True
+    )
+    subprocess.run(["git", "clean", "-fd"], cwd=fixture_path, capture_output=True)
+
+    # Delete any temp branches that may exist from previous test runs
+    branches = subprocess.run(
+        ["git", "branch"],
+        cwd=fixture_path,
+        capture_output=True,
+        text=True,
+    )
+    for line in branches.stdout.split("\n"):
+        if "bifurcate-temp" in line:
+            branch = line.strip().replace("* ", "")
+            subprocess.run(["git", "branch", "-D", branch], cwd=fixture_path, capture_output=True)
+
+    return fixture_path
+
+
+@pytest.fixture
+def multiple_fixture(fixtures_dir: Path) -> Path:
+    """Get multiple files fixture path and ensure clean state."""
+    fixture_path = fixtures_dir / "multiple-files-break"
+
+    subprocess.run(["git", "checkout", "-f", "master"], cwd=fixture_path, capture_output=True)
+    subprocess.run(
+        ["git", "reset", "--hard", "fixture-head"], cwd=fixture_path, capture_output=True
+    )
+    subprocess.run(["git", "clean", "-fd"], cwd=fixture_path, capture_output=True)
+
+    return fixture_path
+
+
+@pytest.fixture
+def hunk_fixture(fixtures_dir: Path) -> Path:
+    """Get single hunk break fixture path and ensure clean state."""
+    fixture_path = fixtures_dir / "single-hunk-break"
+
+    subprocess.run(["git", "checkout", "-f", "master"], cwd=fixture_path, capture_output=True)
+    subprocess.run(
+        ["git", "reset", "--hard", "fixture-head"], cwd=fixture_path, capture_output=True
+    )
+    subprocess.run(["git", "clean", "-fd"], cwd=fixture_path, capture_output=True)
+
+    return fixture_path

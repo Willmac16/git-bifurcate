@@ -91,7 +91,7 @@ def start(commit: str | None, test: str, strategy: str, parent: str | None) -> N
         click.echo()
 
         # Get diff
-        diff_text = git.get_diff(parent_sha, commit_sha)
+        diff_text = git.get_diff(commit_sha, parent_sha)
 
         # Parse changes based on strategy
         strategy_enum = Strategy(strategy.lower())

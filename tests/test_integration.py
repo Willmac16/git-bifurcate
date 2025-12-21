@@ -8,120 +8,13 @@ from pathlib import Path
 
 import pytest
 
+from conftest import get_commit_shas
+
 from git_bifurcate.core import BifurcationEngine
 from git_bifurcate.git_ops import GitRepo
 from git_bifurcate.parser import parse_file_changes, parse_hunk_changes
 from git_bifurcate.test_runner import CommandRunner
 
-
-@pytest.fixture(scope="session")
-def fixtures_dir() -> Path:
-    """Get fixtures directory path and ensure fixtures are initialized."""
-    fixtures_path = Path(__file__).parent / "fixtures"
-
-    # Run setup script if fixtures aren't initialized
-    setup_script = fixtures_path / "setup_fixtures.py"
-    if setup_script.exists():
-        # Check if fixtures are already git repos
-        simple_git = fixtures_path / "simple-file-break" / ".git"
-        if not simple_git.exists():
-            # Need to initialize fixtures
-            subprocess.run(
-                ["python3", str(setup_script)],
-                cwd=fixtures_path,
-                check=True,
-                capture_output=True,
-            )
-
-    return fixtures_path
-
-
-@pytest.fixture
-def simple_fixture(fixtures_dir: Path) -> Path:
-    """Get simple file-break fixture path and ensure clean state."""
-    fixture_path = fixtures_dir / "simple-file-break"
-
-    # Reset master to fixture-head tag (metadata commit)
-    subprocess.run(["git", "checkout", "-f", "master"], cwd=fixture_path, capture_output=True)
-    subprocess.run(
-        ["git", "reset", "--hard", "fixture-head"], cwd=fixture_path, capture_output=True
-    )
-    subprocess.run(["git", "clean", "-fd"], cwd=fixture_path, capture_output=True)
-
-    # Delete any temp branches
-    result = subprocess.run(
-        ["git", "branch"],
-        cwd=fixture_path,
-        capture_output=True,
-        text=True,
-    )
-    for line in result.stdout.split("\n"):
-        if "bifurcate-temp" in line:
-            branch = line.strip().replace("* ", "")
-            subprocess.run(["git", "branch", "-D", branch], cwd=fixture_path, capture_output=True)
-
-    return fixture_path
-
-
-@pytest.fixture
-def multiple_fixture(fixtures_dir: Path) -> Path:
-    """Get multiple files fixture path and ensure clean state."""
-    fixture_path = fixtures_dir / "multiple-files-break"
-
-    # Reset master to fixture-head tag (metadata commit)
-    subprocess.run(["git", "checkout", "-f", "master"], cwd=fixture_path, capture_output=True)
-    subprocess.run(
-        ["git", "reset", "--hard", "fixture-head"], cwd=fixture_path, capture_output=True
-    )
-    subprocess.run(["git", "clean", "-fd"], cwd=fixture_path, capture_output=True)
-
-    return fixture_path
-
-
-@pytest.fixture
-def hunk_fixture(fixtures_dir: Path) -> Path:
-    """Get single hunk break fixture path and ensure clean state."""
-    fixture_path = fixtures_dir / "single-hunk-break"
-
-    # Reset master to fixture-head tag (metadata commit)
-    subprocess.run(["git", "checkout", "-f", "master"], cwd=fixture_path, capture_output=True)
-    subprocess.run(
-        ["git", "reset", "--hard", "fixture-head"], cwd=fixture_path, capture_output=True
-    )
-    subprocess.run(["git", "clean", "-fd"], cwd=fixture_path, capture_output=True)
-
-    return fixture_path
-
-
-def get_commit_shas(repo_path: Path) -> tuple[str, str]:
-    """Get parent and bad commit SHAs from fixture.
-
-    Fixtures have 3 commits:
-    - HEAD^^ = parent (good) commit
-    - HEAD^ = bad commit with breaking change
-    - HEAD = metadata commit (FIXTURE_INFO.md)
-    """
-    # Get HEAD^ (bad commit with breaking change)
-    result = subprocess.run(
-        ["git", "rev-parse", "HEAD^"],
-        cwd=repo_path,
-        capture_output=True,
-        text=True,
-        check=True,
-    )
-    bad_sha = result.stdout.strip()
-
-    # Get HEAD^^ (parent/good commit)
-    result = subprocess.run(
-        ["git", "rev-parse", "HEAD^^"],
-        cwd=repo_path,
-        capture_output=True,
-        text=True,
-        check=True,
-    )
-    parent_sha = result.stdout.strip()
-
-    return parent_sha, bad_sha
 
 
 def test_simple_fixture_setup(simple_fixture: Path) -> None:

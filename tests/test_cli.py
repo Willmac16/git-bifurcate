@@ -199,3 +199,50 @@ def test_cli_reset_with_bifurcation(
 
     # Verify state file is gone
     assert not BifurcationState.exists()
+
+
+def test_cli_start_file_strategy_integration(
+    runner: CliRunner, simple_fixture: Path, change_to_original_dir: None
+) -> None:
+    """Integration test for file strategy using real fixture repo."""
+
+    from conftest import get_commit_shas
+
+    os.chdir(simple_fixture)
+    parent_sha, bad_sha = get_commit_shas(simple_fixture)
+
+    result = runner.invoke(
+        main,
+        ["start", bad_sha, "--strategy", "file", "--test", "bash test.sh"],
+        catch_exceptions=False,
+    )
+
+    assert result.exit_code == 0
+    assert "BREAKING CHANGE FOUND" in result.output
+    assert "module2.py" in result.output
+    # State file should be removed after successful run
+    assert not BifurcationState.exists()
+
+
+def test_cli_start_hunk_strategy_integration(
+    runner: CliRunner, hunk_fixture: Path, change_to_original_dir: None
+) -> None:
+    """Integration test for hunk strategy using real fixture repo."""
+
+    from conftest import get_commit_shas
+
+    os.chdir(hunk_fixture)
+    parent_sha, bad_sha = get_commit_shas(hunk_fixture)
+
+    result = runner.invoke(
+        main,
+        ["start", bad_sha, "--strategy", "hunk", "--test", "python3 test.py"],
+        catch_exceptions=False,
+    )
+
+    assert result.exit_code == 0
+    assert "BREAKING CHANGE FOUND" in result.output
+    assert "calculator.py" in result.output
+    assert "multiply" in result.output
+    # State file should be removed after successful run
+    assert not BifurcationState.exists()
