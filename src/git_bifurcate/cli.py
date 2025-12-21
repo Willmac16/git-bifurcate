@@ -226,7 +226,9 @@ def start(commit: str | None, test: str, strategy: str, parent: str | None) -> N
             # Display changes
             click.echo("\nChanges to bifurcate:")
             for i, hunk_change in enumerate(hunk_changes):
-                click.echo(f"  [{i}] {hunk_change.file_path}:{hunk_change.start_line}-{hunk_change.end_line}")
+                click.echo(
+                    f"  [{i}] {hunk_change.file_path}:{hunk_change.start_line}-{hunk_change.end_line}"
+                )
             click.echo()
 
             # First, verify that all changes together reproduce the failure
