@@ -76,7 +76,7 @@ class GitRepo:
             msg = f"Commit {sha} is a merge commit with multiple parents"
             raise GitOperationError(msg)
 
-        return commit.parents[0].hexsha
+        return str(commit.parents[0].hexsha)
 
     def get_diff(self, commit_sha: str, parent_sha: str | None = None) -> str:
         """Get diff between commit and parent.
