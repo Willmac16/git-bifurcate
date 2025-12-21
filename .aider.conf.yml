@@ -1,0 +1,2 @@
+test-cmd: "source .venv/bin/activate && pytest"
+auto-test: true
