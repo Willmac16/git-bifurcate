@@ -2,16 +2,14 @@
 
 from __future__ import annotations
 
-from typing import TYPE_CHECKING
+from collections.abc import Callable
+from typing import cast
 
 import click
 
 from git_bifurcate.git_ops import GitRepo
-from git_bifurcate.models import CommandResult
+from git_bifurcate.models import CommandResult, FileChange, HunkChange
 from git_bifurcate.test_runner import CommandRunner
-
-if TYPE_CHECKING:
-    from git_bifurcate.models import FileChange, HunkChange
 
 
 class BifurcationEngine:
@@ -331,11 +329,19 @@ class BifurcationEngine:
         total = len(changes)
         tests_run = 0
 
-        test_func = (
-            (lambda idxs: self._test_hunk_changes(changes, base_commit, bad_commit or "", idxs))
-            if bad_commit is not None
-            else (lambda idxs: self._test_changes(changes, base_commit, idxs))
-        )
+        test_func: Callable[[list[int]], CommandResult]
+
+        if bad_commit is not None:
+            hunk_changes = cast(list[HunkChange], changes)
+
+            def test_func(idxs: list[int]) -> CommandResult:
+                return self._test_hunk_changes(hunk_changes, base_commit, bad_commit, idxs)
+
+        else:
+            file_changes = cast(list[FileChange], changes)
+
+            def test_func(idxs: list[int]) -> CommandResult:
+                return self._test_changes(file_changes, base_commit, idxs)
 
         for size in range(2, min(total, 4) + 1):
             for combo in combinations(range(total), size):
