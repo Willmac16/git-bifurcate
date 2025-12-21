@@ -1,3 +1,5 @@
-# Ignore git repositories created by setup_fixtures.py
-*/.git/
-*/__pycache__/
+# Ignore all fixture repository contents created by setup_fixtures.py
+# These are generated test repositories, not source code
+simple-file-break/
+multiple-files-break/
+single-hunk-break/
