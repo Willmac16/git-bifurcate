@@ -4,6 +4,8 @@
 [![Lint](https://github.com/Willmac16/git-bifurcate/actions/workflows/lint.yml/badge.svg)](https://github.com/Willmac16/git-bifurcate/actions/workflows/lint.yml)
 [![Build](https://github.com/Willmac16/git-bifurcate/actions/workflows/build.yml/badge.svg)](https://github.com/Willmac16/git-bifurcate/actions/workflows/build.yml)
 [![Python 3.12+](https://img.shields.io/badge/python-3.12+-blue.svg)](https://www.python.org/downloads/)
+[![codecov](https://codecov.io/gh/Willmac16/git-bifurcate/branch/main/graph/badge.svg)](https://codecov.io/gh/Willmac16/git-bifurcate)
+[![PyPI version](https://badge.fury.io/py/git-bifurcate.svg)](https://badge.fury.io/py/git-bifurcate)
 
 **Find the exact change that broke your tests.**
 
