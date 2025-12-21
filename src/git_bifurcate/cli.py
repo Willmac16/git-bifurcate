@@ -116,9 +116,7 @@ def start(commit: str | None, test: str, strategy: str, parent: str | None) -> N
         for i, change in enumerate(changes):
             if hasattr(change, "start_line"):
                 # HunkChange
-                click.echo(
-                    f"  [{i}] {change.file_path}:{change.start_line}-{change.end_line}"
-                )
+                click.echo(f"  [{i}] {change.file_path}:{change.start_line}-{change.end_line}")
             else:
                 # FileChange
                 click.echo(f"  [{i}] {change.file_path} ({change.change_type})")
@@ -185,27 +183,32 @@ def start(commit: str | None, test: str, strategy: str, parent: str | None) -> N
             breaking_change = engine.bifurcate_files(changes, parent_sha, verbose=True)
 
         if breaking_change:
+            changes_to_show = (
+                breaking_change if isinstance(breaking_change, list) else [breaking_change]
+            )
             click.echo()
             click.echo("=" * 60)
             click.echo("BREAKING CHANGE FOUND!")
             click.echo("=" * 60)
             click.echo()
 
-            if hasattr(breaking_change, "start_line"):
-                # HunkChange
-                click.echo(f"File: {breaking_change.file_path}")
-                click.echo(f"Lines: {breaking_change.start_line}-{breaking_change.end_line}")
-            else:
-                # FileChange
-                click.echo(f"File: {breaking_change.file_path}")
-                click.echo(f"Type: {breaking_change.change_type}")
-
-            click.echo()
-            click.echo("Diff content:")
-            click.echo("-" * 60)
-            click.echo(breaking_change.diff_content)
-            click.echo("-" * 60)
-            click.echo()
+            if len(changes_to_show) > 1:
+                click.echo("Multiple interacting changes identified:")
+            for change in changes_to_show:
+                if hasattr(change, "start_line"):
+                    # HunkChange
+                    click.echo(f"File: {change.file_path}")
+                    click.echo(f"Lines: {change.start_line}-{change.end_line}")
+                else:
+                    # FileChange
+                    click.echo(f"File: {change.file_path}")
+                    click.echo(f"Type: {change.change_type}")
+                click.echo()
+                click.echo("Diff content:")
+                click.echo("-" * 60)
+                click.echo(change.diff_content)
+                click.echo("-" * 60)
+                click.echo()
 
             # Show stats
             stats = engine.get_stats()
@@ -294,7 +297,9 @@ def status() -> None:
             for idx in state.found_breaking:
                 change = state.changes[idx]
                 if hasattr(change, "start_line"):
-                    click.echo(f"  [{idx}] {change.file_path}:{change.start_line}-{change.end_line}")
+                    click.echo(
+                        f"  [{idx}] {change.file_path}:{change.start_line}-{change.end_line}"
+                    )
                 else:
                     click.echo(f"  [{idx}] {change.file_path}")
 

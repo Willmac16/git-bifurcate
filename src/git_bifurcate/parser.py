@@ -26,25 +26,32 @@ def parse_file_changes(diff_text: str) -> list[FileChange]:
     current_file: list[str] = []
     current_path: str | None = None
     current_type = "modified"
+    current_metadata: dict[str, object] = {}
     file_counter = 0
+
+    def _append_current_file() -> None:
+        nonlocal file_counter
+        if current_path and current_file:
+            changes.append(
+                FileChange(
+                    id=str(file_counter),
+                    file_path=current_path,
+                    change_type=current_type,
+                    diff_content="\n".join(current_file),
+                    status=ChangeStatus.UNKNOWN,
+                    metadata=current_metadata,
+                )
+            )
+            file_counter += 1
 
     for line in diff_text.split("\n"):
         if line.startswith("diff --git"):
             # Save previous file if exists
-            if current_path and current_file:
-                changes.append(
-                    FileChange(
-                        id=str(file_counter),
-                        file_path=current_path,
-                        change_type=current_type,
-                        diff_content="\n".join(current_file),
-                        status=ChangeStatus.UNKNOWN,
-                    )
-                )
-                file_counter += 1
+            _append_current_file()
 
             # Start new file
             current_file = [line]
+            current_metadata = {}
             # Extract file path: diff --git a/path/to/file b/path/to/file
             match = re.search(r"b/(.+)$", line)
             current_path = match.group(1) if match else "unknown"
@@ -59,20 +66,24 @@ def parse_file_changes(diff_text: str) -> list[FileChange]:
         elif line.startswith("rename"):
             current_type = "renamed"
             current_file.append(line)
+        elif "160000" in line and "index" in line:
+            # gitlink (submodule) entry
+            current_type = "submodule"
+            current_metadata.setdefault("gitlink_mode", "160000")
+            current_file.append(line)
+        elif line.strip().startswith("-Subproject commit"):
+            current_type = "submodule"
+            current_metadata["old_commit"] = line.split()[-1]
+            current_file.append(line)
+        elif line.strip().startswith("+Subproject commit"):
+            current_type = "submodule"
+            current_metadata["new_commit"] = line.split()[-1]
+            current_file.append(line)
         elif current_file:
             current_file.append(line)
 
     # Don't forget last file
-    if current_path and current_file:
-        changes.append(
-            FileChange(
-                id=str(file_counter),
-                file_path=current_path,
-                change_type=current_type,
-                diff_content="\n".join(current_file),
-                status=ChangeStatus.UNKNOWN,
-            )
-        )
+    _append_current_file()
 
     return changes
 

@@ -194,9 +194,7 @@ def test_bifurcate_files_interaction_effect(
     assert result is None
 
 
-def test_bifurcate_files_first_half_fails(
-    mock_git: MagicMock, mock_test_runner: MagicMock
-) -> None:
+def test_bifurcate_files_first_half_fails(mock_git: MagicMock, mock_test_runner: MagicMock) -> None:
     """Test binary search when first half contains bug."""
     changes = [
         FileChange("0", "file1.py", "modified", "diff1", ChangeStatus.UNKNOWN),
@@ -258,9 +256,7 @@ def test_bifurcate_files_second_half_fails(
     assert result.id == "2"
 
 
-def test_bifurcate_files_handles_skip(
-    mock_git: MagicMock, mock_test_runner: MagicMock
-) -> None:
+def test_bifurcate_files_handles_skip(mock_git: MagicMock, mock_test_runner: MagicMock) -> None:
     """Test handling of SKIP results from dependency issues."""
     changes = [
         FileChange("0", "file1.py", "modified", "diff1", ChangeStatus.UNKNOWN),
@@ -272,7 +268,9 @@ def test_bifurcate_files_handles_skip(
     engine = BifurcationEngine(mock_git, mock_test_runner)
 
     # Simulate: first half can't be applied (dependencies), second half has bug
-    def mock_apply(applied_changes: list[FileChange], base: str, use_temp_branch: bool = True) -> bool:
+    def mock_apply(
+        applied_changes: list[FileChange], base: str, use_temp_branch: bool = True
+    ) -> bool:
         applied_ids = {c.id for c in applied_changes}
         # First half (0, 1) can't be applied
         if applied_ids == {"0", "1"}:
@@ -339,9 +337,7 @@ def test_bifurcate_files_verbose_output(
         assert mock_echo.call_count > 0
 
 
-def test_bifurcate_files_single_change(
-    mock_git: MagicMock, mock_test_runner: MagicMock
-) -> None:
+def test_bifurcate_files_single_change(mock_git: MagicMock, mock_test_runner: MagicMock) -> None:
     """Test bifurcation with single change."""
     changes = [
         FileChange("0", "file1.py", "modified", "diff1", ChangeStatus.UNKNOWN),
@@ -357,9 +353,7 @@ def test_bifurcate_files_single_change(
     assert result.id == "0"
 
 
-def test_bifurcate_files_empty_changes(
-    mock_git: MagicMock, mock_test_runner: MagicMock
-) -> None:
+def test_bifurcate_files_empty_changes(mock_git: MagicMock, mock_test_runner: MagicMock) -> None:
     """Test bifurcation with no changes."""
     changes: list[FileChange] = []
 
@@ -422,7 +416,9 @@ def test_bifurcate_files_skip_warning(
 
     engine = BifurcationEngine(mock_git, mock_test_runner)
 
-    def mock_apply(applied_changes: list[FileChange], base: str, use_temp_branch: bool = True) -> bool:
+    def mock_apply(
+        applied_changes: list[FileChange], base: str, use_temp_branch: bool = True
+    ) -> bool:
         applied_ids = {c.id for c in applied_changes}
         # Lower half can't be applied
         if applied_ids == {"0", "1"}:
@@ -548,3 +544,57 @@ def test_bifurcate_hunks_dependency_error(
     # Check error message
     captured = capsys.readouterr()
     assert "build failures" in captured.out.lower() or "dependency" in captured.out.lower()
+
+
+def test_bifurcate_hunks_interaction_detection(
+    mock_git: MagicMock, mock_test_runner: MagicMock
+) -> None:
+    """Detect when two hunks only fail together."""
+    from git_bifurcate.models import HunkChange
+
+    hunks = [
+        HunkChange("0", "file.py", 1, 5, 1, 3, 1, 5, "@@ -1,3 +1,5 @@", ChangeStatus.UNKNOWN),
+        HunkChange("1", "file.py", 6, 10, 4, 3, 6, 5, "@@ -4,3 +6,5 @@", ChangeStatus.UNKNOWN),
+    ]
+
+    def apply_side_effect(selected_hunks: list[HunkChange], *_: object, **__: object) -> bool:
+        mock_test_runner.last_combo = [h.id for h in selected_hunks]
+        return True
+
+    mock_git.apply_hunk_changes.side_effect = apply_side_effect
+
+    def run_side_effect() -> CommandResult:
+        combo = getattr(mock_test_runner, "last_combo", [])
+        return CommandResult.FAIL if set(combo) == {"0", "1"} else CommandResult.PASS
+
+    mock_test_runner.run.side_effect = run_side_effect
+
+    engine = BifurcationEngine(mock_git, mock_test_runner)
+    result = engine.bifurcate_hunks(hunks, "base", "bad", verbose=False)
+
+    assert isinstance(result, list)
+    assert {h.id for h in result} == {"0", "1"}
+
+
+def test_bifurcate_hunks_conflict_detection(
+    mock_git: MagicMock, mock_test_runner: MagicMock
+) -> None:
+    """Detect when hunks cannot be applied together."""
+    from git_bifurcate.models import HunkChange
+
+    hunks = [
+        HunkChange("0", "file.py", 1, 5, 1, 3, 1, 5, "@@ -1,3 +1,5 @@", ChangeStatus.UNKNOWN),
+        HunkChange("1", "file.py", 6, 10, 4, 3, 6, 5, "@@ -4,3 +6,5 @@", ChangeStatus.UNKNOWN),
+    ]
+
+    def apply_side_effect(selected_hunks: list[HunkChange], *_: object, **__: object) -> bool:
+        return len(selected_hunks) == 1
+
+    mock_git.apply_hunk_changes.side_effect = apply_side_effect
+    mock_test_runner.run.return_value = CommandResult.PASS
+
+    engine = BifurcationEngine(mock_git, mock_test_runner)
+    result = engine.bifurcate_hunks(hunks, "base", "bad", verbose=False)
+
+    assert isinstance(result, list)
+    assert {h.id for h in result} == {"0", "1"}

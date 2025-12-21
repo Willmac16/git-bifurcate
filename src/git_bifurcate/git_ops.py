@@ -226,6 +226,9 @@ class GitRepo:
         Returns:
             True if changes applied successfully, False otherwise.
         """
+        if not changes:
+            return True
+
         original_ref = None
         if use_temp_branch:
             # Save current branch or HEAD to restore on failure
@@ -249,25 +252,49 @@ class GitRepo:
             except GitOperationError:
                 return False
 
+        # Separate submodule changes from regular file patches
+        submodule_changes: list[FileChange] = [c for c in changes if c.change_type == "submodule"]
+        regular_changes: list[FileChange] = [c for c in changes if c.change_type != "submodule"]
+
         # Combine patches
-        combined_patch = "\n".join(change.diff_content for change in changes)
+        combined_patch = "\n".join(
+            change.diff_content for change in regular_changes if change.diff_content
+        )
 
         # Try to apply
-        success = self.apply_patch(combined_patch)
+        success = True
+        if combined_patch.strip():
+            success = self.apply_patch(combined_patch)
 
-        if not success and use_temp_branch:
-            # Clean up failed temp branch
-            try:
-                # Force checkout to discard any failed patch changes
-                self.repo.git.checkout(original_ref, force=True)
-                self.delete_branch(branch_name)
-            except git.GitCommandError:
-                pass
+        if success:
+            for change in submodule_changes:
+                success = self._apply_submodule_change(change)
+                if not success:
+                    break
+
+        if not success:
+            if use_temp_branch:
+                # Clean up failed temp branch
+                try:
+                    # Force checkout to discard any failed patch changes
+                    self.repo.git.checkout(original_ref, force=True)
+                    self.delete_branch(branch_name)
+                except git.GitCommandError:
+                    pass
+            else:
+                try:
+                    self.reset_hard(base_commit)
+                except GitOperationError:
+                    pass
 
         return success
 
     def apply_hunk_changes(
-        self, hunks: list[HunkChange], base_commit: str, bad_commit: str, use_temp_branch: bool = True
+        self,
+        hunks: list[HunkChange],
+        base_commit: str,
+        bad_commit: str,
+        use_temp_branch: bool = True,
     ) -> bool:
         """Apply a subset of hunk changes.
 
@@ -308,6 +335,7 @@ class GitRepo:
 
         # Group hunks by file
         from collections import defaultdict
+
         hunks_by_file: dict[str, list[HunkChange]] = defaultdict(list)
         for hunk in hunks:
             hunks_by_file[hunk.file_path].append(hunk)
@@ -380,4 +408,64 @@ class GitRepo:
                 else:
                     header_lines.append(line)
 
+        return None
+
+    def _apply_submodule_change(self, change: FileChange) -> bool:
+        """Apply a submodule pointer change.
+
+        Args:
+            change: FileChange describing the submodule gitlink update.
+
+        Returns:
+            True if the gitlink and working tree were updated, False otherwise.
+        """
+        target_commit = self._get_submodule_commit(change, "new_commit")
+        if not target_commit:
+            return False
+
+        submodule_path = self.repo_path / change.file_path
+
+        try:
+            # Ensure the submodule exists locally and is initialized
+            subprocess.run(
+                ["git", "submodule", "update", "--init", "--recursive", "--", change.file_path],
+                cwd=self.repo_path,
+                check=True,
+                capture_output=True,
+                text=True,
+            )
+
+            # Checkout the desired commit inside the submodule
+            subprocess.run(
+                ["git", "checkout", target_commit],
+                cwd=submodule_path,
+                check=True,
+                capture_output=True,
+                text=True,
+            )
+
+            # Stage the gitlink update in the parent repository
+            subprocess.run(
+                ["git", "add", change.file_path],
+                cwd=self.repo_path,
+                check=True,
+                capture_output=True,
+                text=True,
+            )
+            return True
+        except subprocess.CalledProcessError:
+            return False
+
+    def _get_submodule_commit(self, change: FileChange, key: str) -> str | None:
+        """Extract a submodule commit from metadata or diff content."""
+        metadata_value = change.metadata.get(key)
+        if isinstance(metadata_value, str):
+            return metadata_value
+
+        search_token = "+Subproject commit" if key == "new_commit" else "-Subproject commit"
+        for line in change.diff_content.split("\n"):
+            if line.strip().startswith(search_token):
+                parts = line.strip().split()
+                if len(parts) == 3:
+                    return parts[-1]
         return None

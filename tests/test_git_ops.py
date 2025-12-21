@@ -17,9 +17,7 @@ def create_commit(repo_path: Path, filename: str, content: str, message: str) ->
     file_path.write_text(content)
 
     subprocess.run(["git", "add", filename], cwd=repo_path, check=True, capture_output=True)
-    subprocess.run(
-        ["git", "commit", "-m", message], cwd=repo_path, check=True, capture_output=True
-    )
+    subprocess.run(["git", "commit", "-m", message], cwd=repo_path, check=True, capture_output=True)
 
     result = subprocess.run(
         ["git", "rev-parse", "HEAD"], cwd=repo_path, check=True, capture_output=True, text=True
@@ -153,9 +151,7 @@ def test_get_diff_multiple_files(git_repo: Path) -> None:
     (git_repo / "file1.txt").write_text("modified1")
     (git_repo / "file2.txt").write_text("content2")
     subprocess.run(["git", "add", "."], cwd=git_repo, check=True, capture_output=True)
-    subprocess.run(
-        ["git", "commit", "-m", "Child"], cwd=git_repo, check=True, capture_output=True
-    )
+    subprocess.run(["git", "commit", "-m", "Child"], cwd=git_repo, check=True, capture_output=True)
 
     result = subprocess.run(
         ["git", "rev-parse", "HEAD"], cwd=git_repo, check=True, capture_output=True, text=True
@@ -331,9 +327,7 @@ def test_apply_changes(git_repo: Path) -> None:
     # Create child commit with a simple modification
     (git_repo / "file1.txt").write_text("modified1\n")
     subprocess.run(["git", "add", "file1.txt"], cwd=git_repo, check=True, capture_output=True)
-    subprocess.run(
-        ["git", "commit", "-m", "Child"], cwd=git_repo, check=True, capture_output=True
-    )
+    subprocess.run(["git", "commit", "-m", "Child"], cwd=git_repo, check=True, capture_output=True)
 
     result = subprocess.run(
         ["git", "rev-parse", "HEAD"], cwd=git_repo, check=True, capture_output=True, text=True
@@ -368,9 +362,7 @@ def test_apply_changes_multiple(git_repo: Path) -> None:
     (git_repo / "file1.txt").write_text("modified1\n")
     (git_repo / "file2.txt").write_text("content2\n")
     subprocess.run(["git", "add", "."], cwd=git_repo, check=True, capture_output=True)
-    subprocess.run(
-        ["git", "commit", "-m", "Child"], cwd=git_repo, check=True, capture_output=True
-    )
+    subprocess.run(["git", "commit", "-m", "Child"], cwd=git_repo, check=True, capture_output=True)
 
     result = subprocess.run(
         ["git", "rev-parse", "HEAD"], cwd=git_repo, check=True, capture_output=True, text=True
@@ -416,7 +408,6 @@ def test_apply_changes_invalid_patch(git_repo: Path) -> None:
     success = repo.apply_changes([invalid_change], parent_sha, use_temp_branch=False)
     assert not success
 
-
     # Get branch count before
     result = subprocess.run(
         ["git", "branch"], cwd=git_repo, capture_output=True, text=True, check=True
@@ -442,6 +433,97 @@ def test_apply_changes_invalid_patch(git_repo: Path) -> None:
     )
     final_branches = len([b for b in result.stdout.split("\n") if b.strip()])
     assert final_branches == initial_branches
+
+
+def test_apply_changes_with_submodule(git_repo: Path, temp_dir: Path) -> None:
+    """Ensure submodule gitlink updates can be applied."""
+    from git_bifurcate.parser import parse_file_changes
+
+    # Create a standalone submodule repository with two commits
+    sub_repo = temp_dir / "sub_repo"
+    sub_repo.mkdir()
+    subprocess.run(["git", "init"], cwd=sub_repo, check=True, capture_output=True)
+    subprocess.run(
+        ["git", "config", "user.name", "Submodule User"],
+        cwd=sub_repo,
+        check=True,
+        capture_output=True,
+    )
+    subprocess.run(
+        ["git", "config", "user.email", "sub@example.com"],
+        cwd=sub_repo,
+        check=True,
+        capture_output=True,
+    )
+    (sub_repo / "data.txt").write_text("old\n")
+    subprocess.run(["git", "add", "data.txt"], cwd=sub_repo, check=True, capture_output=True)
+    subprocess.run(
+        ["git", "commit", "-m", "initial"], cwd=sub_repo, check=True, capture_output=True
+    )
+    old_sha = subprocess.run(
+        ["git", "rev-parse", "HEAD"], cwd=sub_repo, check=True, capture_output=True, text=True
+    ).stdout.strip()
+
+    # New commit
+    (sub_repo / "data.txt").write_text("new\n")
+    subprocess.run(["git", "add", "data.txt"], cwd=sub_repo, check=True, capture_output=True)
+    subprocess.run(["git", "commit", "-m", "update"], cwd=sub_repo, check=True, capture_output=True)
+    new_sha = subprocess.run(
+        ["git", "rev-parse", "HEAD"], cwd=sub_repo, check=True, capture_output=True, text=True
+    ).stdout.strip()
+
+    # Add the submodule to main repo pinned to old commit
+    subprocess.run(
+        ["git", "submodule", "add", str(sub_repo), "vendor/sub_repo"],
+        cwd=git_repo,
+        check=True,
+        capture_output=True,
+    )
+    subprocess.run(
+        ["git", "-C", git_repo / "vendor/sub_repo", "checkout", old_sha],
+        check=True,
+        capture_output=True,
+    )
+    subprocess.run(["git", "add", "."], cwd=git_repo, check=True, capture_output=True)
+    subprocess.run(
+        ["git", "commit", "-m", "Add submodule"], cwd=git_repo, check=True, capture_output=True
+    )
+    parent_sha = subprocess.run(
+        ["git", "rev-parse", "HEAD"], cwd=git_repo, check=True, capture_output=True, text=True
+    ).stdout.strip()
+
+    # Update submodule pointer to new commit
+    subprocess.run(
+        ["git", "-C", git_repo / "vendor/sub_repo", "checkout", new_sha],
+        check=True,
+        capture_output=True,
+    )
+    subprocess.run(["git", "add", "vendor/sub_repo"], cwd=git_repo, check=True, capture_output=True)
+    subprocess.run(
+        ["git", "commit", "-m", "Bump submodule"], cwd=git_repo, check=True, capture_output=True
+    )
+    child_sha = subprocess.run(
+        ["git", "rev-parse", "HEAD"], cwd=git_repo, check=True, capture_output=True, text=True
+    ).stdout.strip()
+
+    repo = GitRepo(git_repo)
+    diff = repo.get_diff(child_sha, parent_sha)
+    changes = parse_file_changes(diff)
+
+    assert len(changes) == 1
+    assert changes[0].change_type == "submodule"
+
+    # Apply submodule change to parent commit
+    success = repo.apply_changes(changes, parent_sha, use_temp_branch=False)
+    assert success
+
+    current_submodule_head = subprocess.run(
+        ["git", "-C", git_repo / "vendor/sub_repo", "rev-parse", "HEAD"],
+        check=True,
+        capture_output=True,
+        text=True,
+    ).stdout.strip()
+    assert current_submodule_head == new_sha
 
 
 def test_apply_hunk_changes_basic(git_repo: Path) -> None:
@@ -502,7 +584,9 @@ def test_apply_hunk_changes_empty_list(git_repo: Path) -> None:
     assert success
 
 
-def test_apply_hunk_changes_missing_file_header(git_repo: Path, monkeypatch: pytest.MonkeyPatch) -> None:
+def test_apply_hunk_changes_missing_file_header(
+    git_repo: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
     """Test apply_hunk_changes when file header extraction fails."""
     from git_bifurcate.models import HunkChange
 

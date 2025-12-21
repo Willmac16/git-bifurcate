@@ -44,6 +44,7 @@ class FileChange:
     change_type: str  # 'modified', 'added', 'deleted', 'renamed'
     diff_content: str
     status: ChangeStatus = ChangeStatus.UNKNOWN
+    metadata: dict[str, Any] = field(default_factory=dict)
 
     def to_dict(self) -> dict[str, Any]:
         """Convert to dictionary for JSON serialization."""
@@ -53,6 +54,7 @@ class FileChange:
             "change_type": self.change_type,
             "diff_content": self.diff_content,
             "status": self.status.value,
+            "metadata": self.metadata,
         }
 
     @classmethod
@@ -64,6 +66,7 @@ class FileChange:
             change_type=data["change_type"],
             diff_content=data["diff_content"],
             status=ChangeStatus(data["status"]),
+            metadata=data.get("metadata", {}),
         )
 
 

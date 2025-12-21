@@ -43,7 +43,9 @@ def simple_fixture(fixtures_dir: Path) -> Path:
 
     # Reset master to fixture-head tag (metadata commit)
     subprocess.run(["git", "checkout", "-f", "master"], cwd=fixture_path, capture_output=True)
-    subprocess.run(["git", "reset", "--hard", "fixture-head"], cwd=fixture_path, capture_output=True)
+    subprocess.run(
+        ["git", "reset", "--hard", "fixture-head"], cwd=fixture_path, capture_output=True
+    )
     subprocess.run(["git", "clean", "-fd"], cwd=fixture_path, capture_output=True)
 
     # Delete any temp branches
@@ -68,7 +70,9 @@ def multiple_fixture(fixtures_dir: Path) -> Path:
 
     # Reset master to fixture-head tag (metadata commit)
     subprocess.run(["git", "checkout", "-f", "master"], cwd=fixture_path, capture_output=True)
-    subprocess.run(["git", "reset", "--hard", "fixture-head"], cwd=fixture_path, capture_output=True)
+    subprocess.run(
+        ["git", "reset", "--hard", "fixture-head"], cwd=fixture_path, capture_output=True
+    )
     subprocess.run(["git", "clean", "-fd"], cwd=fixture_path, capture_output=True)
 
     return fixture_path
@@ -81,7 +85,9 @@ def hunk_fixture(fixtures_dir: Path) -> Path:
 
     # Reset master to fixture-head tag (metadata commit)
     subprocess.run(["git", "checkout", "-f", "master"], cwd=fixture_path, capture_output=True)
-    subprocess.run(["git", "reset", "--hard", "fixture-head"], cwd=fixture_path, capture_output=True)
+    subprocess.run(
+        ["git", "reset", "--hard", "fixture-head"], cwd=fixture_path, capture_output=True
+    )
     subprocess.run(["git", "clean", "-fd"], cwd=fixture_path, capture_output=True)
 
     return fixture_path
@@ -130,7 +136,9 @@ def test_simple_fixture_setup(simple_fixture: Path) -> None:
     parent_sha, bad_sha = get_commit_shas(simple_fixture)
 
     # Test parent commit passes
-    subprocess.run(["git", "checkout", parent_sha], cwd=simple_fixture, check=True, capture_output=True)
+    subprocess.run(
+        ["git", "checkout", parent_sha], cwd=simple_fixture, check=True, capture_output=True
+    )
     result = subprocess.run(
         ["bash", "test.sh"],
         cwd=simple_fixture,
@@ -139,7 +147,9 @@ def test_simple_fixture_setup(simple_fixture: Path) -> None:
     assert result.returncode == 0, "Parent commit should pass tests"
 
     # Test bad commit fails
-    subprocess.run(["git", "checkout", bad_sha], cwd=simple_fixture, check=True, capture_output=True)
+    subprocess.run(
+        ["git", "checkout", bad_sha], cwd=simple_fixture, check=True, capture_output=True
+    )
     result = subprocess.run(
         ["bash", "test.sh"],
         cwd=simple_fixture,
@@ -175,10 +185,14 @@ def test_file_level_bifurcation_simple(simple_fixture: Path, change_to_original_
     # Check stats
     stats = engine.get_stats()
     # With 4 files, binary search should take ~3-4 tests
-    assert stats["tests_run"] <=6, f"Should use binary search efficiently, got {stats['tests_run']} tests"
+    assert stats["tests_run"] <= 6, (
+        f"Should use binary search efficiently, got {stats['tests_run']} tests"
+    )
 
 
-def test_file_level_bifurcation_multiple(multiple_fixture: Path, change_to_original_dir: None) -> None:
+def test_file_level_bifurcation_multiple(
+    multiple_fixture: Path, change_to_original_dir: None
+) -> None:
     """Test file-level bifurcation on multiple files fixture."""
     os.chdir(multiple_fixture)
 
@@ -205,7 +219,9 @@ def test_file_level_bifurcation_multiple(multiple_fixture: Path, change_to_origi
     # Check efficiency
     stats = engine.get_stats()
     # With 5 files, binary search should take ~4-5 tests vs 5 for linear
-    assert stats["tests_run"] <= 7, f"Should use binary search efficiently, got {stats['tests_run']} tests"
+    assert stats["tests_run"] <= 7, (
+        f"Should use binary search efficiently, got {stats['tests_run']} tests"
+    )
 
 
 def test_hunk_level_bifurcation(hunk_fixture: Path, change_to_original_dir: None) -> None:
@@ -236,7 +252,9 @@ def test_hunk_level_bifurcation(hunk_fixture: Path, change_to_original_dir: None
     assert "multiply" in breaking_hunk.diff_content.lower()
 
 
-def test_integration_with_git_state_cleanup(simple_fixture: Path, change_to_original_dir: None) -> None:
+def test_integration_with_git_state_cleanup(
+    simple_fixture: Path, change_to_original_dir: None
+) -> None:
     """Test that bifurcation cleans up git state properly."""
     os.chdir(simple_fixture)
 

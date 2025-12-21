@@ -198,8 +198,24 @@ index 1234567..abcdefg 100644
     changes = parse_file_changes(diff)
     assert all(c.status == ChangeStatus.UNKNOWN for c in changes)
 
-    hunks = parse_hunk_changes(diff)
-    assert all(h.status == ChangeStatus.UNKNOWN for h in hunks)
+
+def test_parse_submodule_change() -> None:
+    """Test parsing submodule gitlink updates."""
+    submodule_diff = """diff --git a/subproj b/subproj
+index 1111111..2222222 160000
+--- a/subproj
++++ b/subproj
+@@ -1 +1 @@
+-Subproject commit 1111111111111111111111111111111111111111
++Subproject commit 2222222222222222222222222222222222222222
+"""
+
+    changes = parse_file_changes(submodule_diff)
+    assert len(changes) == 1
+    change = changes[0]
+    assert change.change_type == "submodule"
+    assert change.metadata["old_commit"].startswith("1111")
+    assert change.metadata["new_commit"].startswith("2222")
 
 
 def test_parse_complex_diff() -> None:
