@@ -31,7 +31,7 @@ def test_git_repo_init(git_repo: Path) -> None:
     """Test GitRepo initialization."""
     repo = GitRepo(git_repo)
 
-    assert repo.repo_path == git_repo
+    assert repo.repo_path == git_repo.resolve()
     assert repo.repo is not None
 
 
@@ -51,7 +51,7 @@ def test_git_repo_init_current_dir(git_repo: Path, change_to_original_dir: None)
     os.chdir(git_repo)
 
     repo = GitRepo()
-    assert repo.repo_path == git_repo
+    assert repo.repo_path == git_repo.resolve()
 
 
 def test_get_commit(git_repo: Path) -> None:
