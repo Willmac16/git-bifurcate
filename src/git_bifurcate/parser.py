@@ -96,6 +96,27 @@ def parse_hunk_changes(diff_text: str) -> list[HunkChange]:
 
     for line in diff_text.split("\n"):
         if line.startswith("diff --git"):
+            # Save previous hunk before changing files
+            if current_file and current_hunk and hunk_header:
+                orig_start, orig_len, new_start, new_len = hunk_header
+                hunks.append(
+                    HunkChange(
+                        id=str(hunk_counter),
+                        file_path=current_file,
+                        start_line=new_start,
+                        end_line=new_start + new_len - 1,
+                        original_start=orig_start,
+                        original_length=orig_len,
+                        new_start=new_start,
+                        new_length=new_len,
+                        diff_content="\n".join(current_hunk),
+                        status=ChangeStatus.UNKNOWN,
+                    )
+                )
+                hunk_counter += 1
+                current_hunk = []
+                hunk_header = None
+
             # Extract file path
             match = re.search(r"b/(.+)$", line)
             current_file = match.group(1) if match else "unknown"
