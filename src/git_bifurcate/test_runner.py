@@ -5,10 +5,10 @@ from __future__ import annotations
 import subprocess
 from pathlib import Path
 
-from git_bifurcate.models import TestResult
+from git_bifurcate.models import CommandResult
 
 
-class TestRunner:
+class CommandRunner:
     """Runs test commands and captures results."""
 
     def __init__(
@@ -25,11 +25,11 @@ class TestRunner:
         self.working_dir = Path(working_dir) if working_dir else Path.cwd()
         self.timeout = timeout
 
-    def run(self) -> TestResult:
+    def run(self) -> CommandResult:
         """Run the test command.
 
         Returns:
-            TestResult indicating outcome.
+            CommandResult indicating outcome.
         """
         try:
             result = subprocess.run(
@@ -43,11 +43,11 @@ class TestRunner:
             )
 
             if result.returncode == 0:
-                return TestResult.PASS
+                return CommandResult.PASS
             else:
-                return TestResult.FAIL
+                return CommandResult.FAIL
 
         except subprocess.TimeoutExpired:
-            return TestResult.ERROR
+            return CommandResult.ERROR
         except Exception:
-            return TestResult.ERROR
+            return CommandResult.ERROR

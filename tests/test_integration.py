@@ -11,7 +11,7 @@ import pytest
 from git_bifurcate.core import BifurcationEngine
 from git_bifurcate.git_ops import GitRepo
 from git_bifurcate.parser import parse_file_changes, parse_hunk_changes
-from git_bifurcate.test_runner import TestRunner
+from git_bifurcate.test_runner import CommandRunner
 
 
 @pytest.fixture(scope="session")
@@ -163,7 +163,7 @@ def test_file_level_bifurcation_simple(simple_fixture: Path, change_to_original_
     assert len(changes) == 4
 
     # Run bifurcation
-    test_runner = TestRunner("bash test.sh", working_dir=simple_fixture)
+    test_runner = CommandRunner("bash test.sh", working_dir=simple_fixture)
     engine = BifurcationEngine(git, test_runner)
 
     breaking_change = engine.bifurcate_files(changes, parent_sha, verbose=False)
@@ -193,7 +193,7 @@ def test_file_level_bifurcation_multiple(multiple_fixture: Path, change_to_origi
     assert len(changes) == 5
 
     # Run bifurcation
-    test_runner = TestRunner("bash test.sh", working_dir=multiple_fixture)
+    test_runner = CommandRunner("bash test.sh", working_dir=multiple_fixture)
     engine = BifurcationEngine(git, test_runner)
 
     breaking_change = engine.bifurcate_files(changes, parent_sha, verbose=False)
@@ -208,7 +208,6 @@ def test_file_level_bifurcation_multiple(multiple_fixture: Path, change_to_origi
     assert stats["tests_run"] <= 7, f"Should use binary search efficiently, got {stats['tests_run']} tests"
 
 
-@pytest.mark.skip(reason="Hunk-level bifurcation not yet fully implemented - Phase 2 pending")
 def test_hunk_level_bifurcation(hunk_fixture: Path, change_to_original_dir: None) -> None:
     """Test hunk-level bifurcation on single file with multiple hunks."""
     os.chdir(hunk_fixture)
@@ -224,12 +223,11 @@ def test_hunk_level_bifurcation(hunk_fixture: Path, change_to_original_dir: None
     assert len(hunks) >= 4
 
     # Run hunk-level bifurcation
-    test_runner = TestRunner("python3 test.py", working_dir=hunk_fixture)
+    test_runner = CommandRunner("python3 test.py", working_dir=hunk_fixture)
     engine = BifurcationEngine(git, test_runner)
 
-    # For now, hunk bifurcation uses same method as file
-    # This will be updated when we implement bifurcate_hunks()
-    breaking_hunk = engine.bifurcate_files(hunks, parent_sha, verbose=False)
+    # Use bifurcate_hunks for hunk-level search
+    breaking_hunk = engine.bifurcate_hunks(hunks, parent_sha, bad_sha, verbose=False)
 
     # Should find the multiply function hunk
     assert breaking_hunk is not None
@@ -259,7 +257,7 @@ def test_integration_with_git_state_cleanup(simple_fixture: Path, change_to_orig
     diff = git.get_diff(bad_sha, parent_sha)
     changes = parse_file_changes(diff)
 
-    test_runner = TestRunner("bash test.sh", working_dir=simple_fixture)
+    test_runner = CommandRunner("bash test.sh", working_dir=simple_fixture)
     engine = BifurcationEngine(git, test_runner)
 
     breaking_change = engine.bifurcate_files(changes, parent_sha, verbose=False)
@@ -293,9 +291,9 @@ def test_no_breaking_change_found(simple_fixture: Path, change_to_original_dir: 
             pass
 
         def run(self) -> object:
-            from git_bifurcate.models import TestResult
+            from git_bifurcate.models import CommandResult
 
-            return TestResult.PASS
+            return CommandResult.PASS
 
     engine = BifurcationEngine(git, AlwaysPassRunner("true"))  # type: ignore[arg-type]
 

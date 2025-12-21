@@ -9,7 +9,7 @@ from typing import TYPE_CHECKING
 import git
 
 if TYPE_CHECKING:
-    from git_bifurcate.models import FileChange
+    from git_bifurcate.models import FileChange, HunkChange
 
 
 class GitOperationError(Exception):
@@ -256,3 +256,109 @@ class GitRepo:
                 pass
 
         return success
+
+    def apply_hunk_changes(
+        self, hunks: list[HunkChange], base_commit: str, bad_commit: str, use_temp_branch: bool = True
+    ) -> bool:
+        """Apply a subset of hunk changes.
+
+        Args:
+            hunks: List of HunkChange objects to apply.
+            base_commit: Commit SHA to apply changes on top of.
+            bad_commit: Commit SHA where hunks came from (for header reconstruction).
+            use_temp_branch: Whether to use temporary branch (safer).
+
+        Returns:
+            True if changes applied successfully, False otherwise.
+        """
+        if not hunks:
+            return True
+
+        if use_temp_branch:
+            # Create temp branch
+            import uuid
+
+            branch_name = f"bifurcate-temp-{uuid.uuid4().hex[:8]}"
+            try:
+                self.create_temp_branch(branch_name, base_commit)
+            except GitOperationError:
+                return False
+        else:
+            try:
+                self.reset_hard(base_commit)
+            except GitOperationError:
+                return False
+
+        # Group hunks by file
+        from collections import defaultdict
+        hunks_by_file: dict[str, list[HunkChange]] = defaultdict(list)
+        for hunk in hunks:
+            hunks_by_file[hunk.file_path].append(hunk)
+
+        # Get full diff to extract headers
+        full_diff = self.get_diff(bad_commit, base_commit)
+
+        # Build patch with headers for each file
+        patch_parts = []
+        for file_path, file_hunks in hunks_by_file.items():
+            # Extract file headers from full diff
+            file_header = self._extract_file_header(full_diff, file_path)
+            if not file_header:
+                # Can't reconstruct patch without headers
+                if use_temp_branch:
+                    try:
+                        self.checkout(base_commit)
+                        self.delete_branch(branch_name)
+                    except GitOperationError:
+                        pass
+                return False
+
+            patch_parts.append(file_header)
+            # Add selected hunks
+            for hunk in file_hunks:
+                patch_parts.append(hunk.diff_content)
+
+        combined_patch = "\n".join(patch_parts)
+
+        # Try to apply
+        success = self.apply_patch(combined_patch)
+
+        if not success and use_temp_branch:
+            # Clean up failed temp branch
+            try:
+                self.checkout(base_commit)
+                self.delete_branch(branch_name)
+            except GitOperationError:
+                pass
+
+        return success
+
+    def _extract_file_header(self, full_diff: str, file_path: str) -> str | None:
+        """Extract file header lines from a diff.
+
+        Args:
+            full_diff: Complete diff text.
+            file_path: Path to file to extract header for.
+
+        Returns:
+            Header lines (diff --git, index, ---, +++) or None if not found.
+        """
+        lines = full_diff.split("\n")
+        header_lines = []
+        in_file = False
+
+        for line in lines:
+            if line.startswith("diff --git") and file_path in line:
+                in_file = True
+                header_lines = [line]
+            elif in_file:
+                if line.startswith("@@"):
+                    # Found start of hunks, header is complete
+                    return "\n".join(header_lines)
+                elif line.startswith("diff --git"):
+                    # Moved to next file without finding hunks
+                    return None
+                else:
+                    header_lines.append(line)
+
+        return None

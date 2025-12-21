@@ -18,8 +18,8 @@ class ChangeStatus(str, Enum):
     SKIP = "skip"
 
 
-class TestResult(str, Enum):
-    """Result of running a test."""
+class CommandResult(str, Enum):
+    """Result of running a test command."""
 
     PASS = "pass"
     FAIL = "fail"
