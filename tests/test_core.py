@@ -272,7 +272,7 @@ def test_bifurcate_files_handles_skip(
     engine = BifurcationEngine(mock_git, mock_test_runner)
 
     # Simulate: first half can't be applied (dependencies), second half has bug
-    def mock_apply(applied_changes: list[FileChange], base: str, use_temp: bool = True) -> bool:
+    def mock_apply(applied_changes: list[FileChange], base: str, use_temp_branch: bool = True) -> bool:
         applied_ids = {c.id for c in applied_changes}
         # First half (0, 1) can't be applied
         if applied_ids == {"0", "1"}:
