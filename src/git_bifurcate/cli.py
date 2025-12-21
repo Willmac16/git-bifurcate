@@ -9,9 +9,9 @@ import click
 
 from git_bifurcate.core import BifurcationEngine
 from git_bifurcate.git_ops import GitRepo
-from git_bifurcate.models import BifurcationState, Strategy, TestResult
+from git_bifurcate.models import BifurcationState, CommandResult, Strategy
 from git_bifurcate.parser import parse_file_changes, parse_hunk_changes
-from git_bifurcate.test_runner import TestRunner
+from git_bifurcate.test_runner import CommandRunner
 
 
 @click.group(invoke_without_command=True)
@@ -74,13 +74,15 @@ def start(commit: str | None, test: str, strategy: str, parent: str | None) -> N
             commit = "HEAD"
 
         # Get commit SHA
-        commit_sha = git.get_commit(commit)
+        commit_obj = git.get_commit(commit)
+        commit_sha = commit_obj.hexsha
 
         # Get parent commit
         if parent is None:
             parent_sha = git.get_parent_commit(commit_sha)
         else:
-            parent_sha = git.get_commit(parent)
+            parent_obj = git.get_commit(parent)
+            parent_sha = parent_obj.hexsha
 
         click.echo(f"Starting bifurcation of commit {commit_sha[:8]}")
         click.echo(f"Parent commit: {parent_sha[:8]}")
@@ -124,13 +126,16 @@ def start(commit: str | None, test: str, strategy: str, parent: str | None) -> N
 
         # First, verify that all changes together reproduce the failure
         click.echo("Verifying that all changes together fail the test...")
-        test_runner = TestRunner(test)
+        test_runner = CommandRunner(test)
         engine = BifurcationEngine(git, test_runner)
 
         all_indices = list(range(len(changes)))
-        result = engine._test_changes(changes, parent_sha, all_indices)
+        if strategy_enum == Strategy.HUNK:
+            result = engine._test_hunk_changes(changes, parent_sha, commit_sha, all_indices)
+        else:
+            result = engine._test_changes(changes, parent_sha, all_indices)
 
-        if result != TestResult.FAIL:
+        if result != CommandResult.FAIL:
             click.echo(f"\nError: Expected test to FAIL with all changes, but got {result.value}")
             click.echo("The commit you're bifurcating should fail tests.")
             click.echo("Please verify:")
@@ -144,9 +149,12 @@ def start(commit: str | None, test: str, strategy: str, parent: str | None) -> N
 
         # Verify that no changes passes
         click.echo("Verifying that parent commit passes the test...")
-        result = engine._test_changes(changes, parent_sha, [])
+        if strategy_enum == Strategy.HUNK:
+            result = engine._test_hunk_changes(changes, parent_sha, commit_sha, [])
+        else:
+            result = engine._test_changes(changes, parent_sha, [])
 
-        if result != TestResult.PASS:
+        if result != CommandResult.PASS:
             click.echo(f"\nError: Expected test to PASS with no changes, but got {result.value}")
             click.echo("The parent commit should pass tests.")
             sys.exit(1)
@@ -171,7 +179,10 @@ def start(commit: str | None, test: str, strategy: str, parent: str | None) -> N
         click.echo("=" * 60)
         click.echo()
 
-        breaking_change = engine.bifurcate_files(changes, parent_sha, verbose=True)
+        if strategy_enum == Strategy.HUNK:
+            breaking_change = engine.bifurcate_hunks(changes, parent_sha, commit_sha, verbose=True)
+        else:
+            breaking_change = engine.bifurcate_files(changes, parent_sha, verbose=True)
 
         if breaking_change:
             click.echo()

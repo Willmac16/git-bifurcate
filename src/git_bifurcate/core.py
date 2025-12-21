@@ -7,8 +7,8 @@ from typing import TYPE_CHECKING
 import click
 
 from git_bifurcate.git_ops import GitRepo
-from git_bifurcate.models import TestResult
-from git_bifurcate.test_runner import TestRunner
+from git_bifurcate.models import CommandResult
+from git_bifurcate.test_runner import CommandRunner
 
 if TYPE_CHECKING:
     from git_bifurcate.models import FileChange
@@ -17,7 +17,7 @@ if TYPE_CHECKING:
 class BifurcationEngine:
     """Implements binary search for finding breaking changes."""
 
-    def __init__(self, git_repo: GitRepo, test_runner: TestRunner) -> None:
+    def __init__(self, git_repo: GitRepo, test_runner: CommandRunner) -> None:
         """Initialize bifurcation engine.
 
         Args:
@@ -26,7 +26,7 @@ class BifurcationEngine:
         """
         self.git = git_repo
         self.test_runner = test_runner
-        self.tested_combinations: dict[str, TestResult] = {}
+        self.tested_combinations: dict[str, CommandResult] = {}
 
     def _get_combination_key(self, indices: list[int]) -> str:
         """Get cache key for a combination of changes."""
@@ -34,7 +34,7 @@ class BifurcationEngine:
 
     def _test_changes(
         self, changes: list[FileChange], base_commit: str, indices: list[int]
-    ) -> TestResult:
+    ) -> CommandResult:
         """Test a specific combination of changes.
 
         Args:
@@ -43,7 +43,7 @@ class BifurcationEngine:
             indices: Indices of changes to test.
 
         Returns:
-            TestResult from running tests.
+            CommandResult from running tests.
         """
         # Check cache
         cache_key = self._get_combination_key(indices)
@@ -58,7 +58,7 @@ class BifurcationEngine:
 
         if not success:
             # Failed to apply - likely dependency issues
-            result = TestResult.SKIP
+            result = CommandResult.SKIP
         else:
             # Run test
             result = self.test_runner.run()
@@ -105,12 +105,12 @@ class BifurcationEngine:
             # Test lower half
             result = self._test_changes(changes, base_commit, lower_half)
 
-            if result == TestResult.FAIL:
+            if result == CommandResult.FAIL:
                 if verbose:
                     click.echo(f"  Result: FAIL - narrowing to changes {lower_half}")
                 search_space = lower_half
 
-            elif result == TestResult.PASS:
+            elif result == CommandResult.PASS:
                 if verbose:
                     click.echo(f"  Result: PASS - narrowing to changes {upper_half}")
                 search_space = upper_half
@@ -123,9 +123,9 @@ class BifurcationEngine:
                 # Try upper half when lower half won't build
                 upper_result = self._test_changes(changes, base_commit, upper_half)
 
-                if upper_result == TestResult.FAIL:
+                if upper_result == CommandResult.FAIL:
                     search_space = upper_half
-                elif upper_result == TestResult.PASS:
+                elif upper_result == CommandResult.PASS:
                     # Complex case - might need to handle dependencies
                     click.echo(
                         "Warning: Lower half won't build but upper half passes. "
@@ -146,7 +146,7 @@ class BifurcationEngine:
             # Verify it actually breaks
             result = self._test_changes(changes, base_commit, [final_index])
 
-            if result == TestResult.FAIL:
+            if result == CommandResult.FAIL:
                 if verbose:
                     click.echo(
                         f"\nFound breaking change after {iteration} iterations!"
@@ -162,6 +162,139 @@ class BifurcationEngine:
 
         return None
 
+    def _test_hunk_changes(
+        self, hunks: list, base_commit: str, bad_commit: str, indices: list[int]
+    ) -> CommandResult:
+        """Test a specific combination of hunk changes.
+
+        Args:
+            hunks: List of all HunkChange objects.
+            base_commit: Base commit SHA to apply on top of.
+            bad_commit: Bad commit SHA (for diff reconstruction).
+            indices: Indices of hunks to test.
+
+        Returns:
+            CommandResult from running tests.
+        """
+        # Check cache
+        from git_bifurcate.models import HunkChange
+        cache_key = self._get_combination_key(indices)
+        if cache_key in self.tested_combinations:
+            return self.tested_combinations[cache_key]
+
+        # Select hunks to test
+        selected_hunks: list[HunkChange] = [hunks[i] for i in indices]
+
+        # Apply hunks (don't use temp branches to avoid state issues)
+        success = self.git.apply_hunk_changes(selected_hunks, base_commit, bad_commit, use_temp_branch=False)
+
+        if not success:
+            # Failed to apply - likely dependency issues
+            result = CommandResult.SKIP
+        else:
+            result = self.test_runner.run()
+
+        # Cache result
+        self.tested_combinations[cache_key] = result
+
+        # Always checkout base commit for next iteration (non-destructive)
+        try:
+            self.git.checkout(base_commit)
+        except Exception:
+            pass
+
+        return result
+
+    def bifurcate_hunks(
+        self, hunks: list, base_commit: str, bad_commit: str, verbose: bool = True
+    ) -> Any | None:
+        """Binary search through hunk changes to find breaking change.
+
+        Args:
+            hunks: List of HunkChange objects to search through.
+            base_commit: Commit SHA to apply changes on top of.
+            bad_commit: Commit SHA where hunks came from.
+            verbose: Whether to print progress messages.
+
+        Returns:
+            The breaking HunkChange, or None if not found.
+        """
+        from git_bifurcate.models import HunkChange
+        search_space = list(range(len(hunks)))
+        iteration = 0
+
+        while len(search_space) > 1:
+            iteration += 1
+            mid = len(search_space) // 2
+            lower_half = search_space[:mid]
+            upper_half = search_space[mid:]
+
+            if verbose:
+                click.echo(
+                    f"Iteration {iteration}: Testing hunks {lower_half[0] + 1}-"
+                    f"{lower_half[-1] + 1} of {len(hunks)}..."
+                )
+
+            # Test lower half
+            result = self._test_hunk_changes(hunks, base_commit, bad_commit, lower_half)
+
+            if result == CommandResult.FAIL:
+                if verbose:
+                    click.echo(f"  Result: FAIL - narrowing to hunks {lower_half}")
+                search_space = lower_half
+
+            elif result == CommandResult.PASS:
+                if verbose:
+                    click.echo(f"  Result: PASS - narrowing to hunks {upper_half}")
+                search_space = upper_half
+
+            else:  # SKIP or ERROR
+                if verbose:
+                    click.echo(
+                        f"  Result: {result.value} - trying upper half instead"
+                    )
+                # Try upper half when lower half won't build
+                upper_result = self._test_hunk_changes(hunks, base_commit, bad_commit, upper_half)
+
+                if upper_result == CommandResult.FAIL:
+                    search_space = upper_half
+                elif upper_result == CommandResult.PASS:
+                    # Complex case - might need to handle dependencies
+                    click.echo(
+                        "Warning: Lower half won't build but upper half passes. "
+                        "This suggests dependency issues."
+                    )
+                    # For MVP, just continue with upper half
+                    search_space = upper_half
+                else:
+                    # Both halves skip - complex dependency issue
+                    click.echo(
+                        "Error: Too many build failures. Possible dependency issues."
+                    )
+                    return None
+
+        # Found single hunk
+        if len(search_space) == 1:
+            final_index = search_space[0]
+            # Verify it actually breaks
+            result = self._test_hunk_changes(hunks, base_commit, bad_commit, [final_index])
+
+            if result == CommandResult.FAIL:
+                if verbose:
+                    click.echo(
+                        f"\nFound breaking hunk after {iteration} iterations!"
+                    )
+                return hunks[final_index]
+            else:
+                if verbose:
+                    click.echo(
+                        "\nWarning: Isolated hunk doesn't fail on its own. "
+                        "May be an interaction effect."
+                    )
+                return None
+
+        return None
+
     def get_stats(self) -> dict[str, int]:
         """Get statistics about bifurcation session.
 
@@ -171,15 +304,15 @@ class BifurcationEngine:
         return {
             "tests_run": len(self.tested_combinations),
             "passed": sum(
-                1 for r in self.tested_combinations.values() if r == TestResult.PASS
+                1 for r in self.tested_combinations.values() if r == CommandResult.PASS
             ),
             "failed": sum(
-                1 for r in self.tested_combinations.values() if r == TestResult.FAIL
+                1 for r in self.tested_combinations.values() if r == CommandResult.FAIL
             ),
             "skipped": sum(
-                1 for r in self.tested_combinations.values() if r == TestResult.SKIP
+                1 for r in self.tested_combinations.values() if r == CommandResult.SKIP
             ),
             "errors": sum(
-                1 for r in self.tested_combinations.values() if r == TestResult.ERROR
+                1 for r in self.tested_combinations.values() if r == CommandResult.ERROR
             ),
         }

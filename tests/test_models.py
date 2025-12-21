@@ -13,7 +13,7 @@ from git_bifurcate.models import (
     FileChange,
     HunkChange,
     Strategy,
-    TestResult,
+    CommandResult,
 )
 
 
@@ -26,11 +26,11 @@ def test_change_status_enum() -> None:
 
 
 def test_test_result_enum() -> None:
-    """Test TestResult enum values."""
-    assert TestResult.PASS.value == "pass"
-    assert TestResult.FAIL.value == "fail"
-    assert TestResult.SKIP.value == "skip"
-    assert TestResult.ERROR.value == "error"
+    """Test CommandResult enum values."""
+    assert CommandResult.PASS.value == "pass"
+    assert CommandResult.FAIL.value == "fail"
+    assert CommandResult.SKIP.value == "skip"
+    assert CommandResult.ERROR.value == "error"
 
 
 def test_strategy_enum() -> None:

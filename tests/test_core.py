@@ -8,8 +8,8 @@ import pytest
 
 from git_bifurcate.core import BifurcationEngine
 from git_bifurcate.git_ops import GitRepo
-from git_bifurcate.models import ChangeStatus, FileChange, TestResult
-from git_bifurcate.test_runner import TestRunner
+from git_bifurcate.models import ChangeStatus, FileChange, CommandResult
+from git_bifurcate.test_runner import CommandRunner
 
 
 @pytest.fixture
@@ -20,8 +20,8 @@ def mock_git() -> MagicMock:
 
 @pytest.fixture
 def mock_test_runner() -> MagicMock:
-    """Create mock TestRunner."""
-    return MagicMock(spec=TestRunner)
+    """Create mock CommandRunner."""
+    return MagicMock(spec=CommandRunner)
 
 
 @pytest.fixture
@@ -62,21 +62,21 @@ def test_test_changes_caching(
     engine = BifurcationEngine(mock_git, mock_test_runner)
 
     mock_git.apply_changes.return_value = True
-    mock_test_runner.run.return_value = TestResult.PASS
+    mock_test_runner.run.return_value = CommandResult.PASS
 
     # First call
     result1 = engine._test_changes(sample_changes, "base", [0, 1])
-    assert result1 == TestResult.PASS
+    assert result1 == CommandResult.PASS
     assert mock_test_runner.run.call_count == 1
 
     # Second call with same indices should use cache
     result2 = engine._test_changes(sample_changes, "base", [0, 1])
-    assert result2 == TestResult.PASS
+    assert result2 == CommandResult.PASS
     assert mock_test_runner.run.call_count == 1  # Still 1, not 2
 
     # Call with different order should use cache (keys are sorted)
     result3 = engine._test_changes(sample_changes, "base", [1, 0])
-    assert result3 == TestResult.PASS
+    assert result3 == CommandResult.PASS
     assert mock_test_runner.run.call_count == 1  # Still 1
 
 
@@ -90,7 +90,7 @@ def test_test_changes_apply_failure(
 
     result = engine._test_changes(sample_changes, "base", [0, 1])
 
-    assert result == TestResult.SKIP
+    assert result == CommandResult.SKIP
     assert mock_test_runner.run.call_count == 0  # Test should not run
 
 
@@ -101,7 +101,7 @@ def test_test_changes_test_execution(
     engine = BifurcationEngine(mock_git, mock_test_runner)
 
     mock_git.apply_changes.return_value = True
-    mock_test_runner.run.return_value = TestResult.FAIL
+    mock_test_runner.run.return_value = CommandResult.FAIL
 
     result = engine._test_changes(sample_changes, "base_sha", [0, 2])
 
@@ -116,7 +116,7 @@ def test_test_changes_test_execution(
 
     # Verify test was run
     mock_test_runner.run.assert_called_once()
-    assert result == TestResult.FAIL
+    assert result == CommandResult.FAIL
 
 
 def test_bifurcate_files_single_breaking_change(
@@ -128,7 +128,7 @@ def test_bifurcate_files_single_breaking_change(
     mock_git.apply_changes.return_value = True
 
     # Simulate: changes[1] is the breaking change
-    def mock_run() -> TestResult:
+    def mock_run() -> CommandResult:
         # Get the indices being tested from the last apply_changes call
         call_args = mock_git.apply_changes.call_args
         if call_args:
@@ -137,9 +137,9 @@ def test_bifurcate_files_single_breaking_change(
 
             # If change "1" is included, test fails
             if "1" in applied_ids:
-                return TestResult.FAIL
-            return TestResult.PASS
-        return TestResult.PASS
+                return CommandResult.FAIL
+            return CommandResult.PASS
+        return CommandResult.PASS
 
     mock_test_runner.run.side_effect = mock_run
 
@@ -157,7 +157,7 @@ def test_bifurcate_files_no_breaking_change(
     engine = BifurcationEngine(mock_git, mock_test_runner)
 
     mock_git.apply_changes.return_value = True
-    mock_test_runner.run.return_value = TestResult.PASS  # All tests pass
+    mock_test_runner.run.return_value = CommandResult.PASS  # All tests pass
 
     result = engine.bifurcate_files(sample_changes, "base", verbose=False)
 
@@ -177,14 +177,14 @@ def test_bifurcate_files_interaction_effect(
     mock_git.apply_changes.return_value = True
 
     # Simulate interaction: both pass individually but fail together
-    def mock_run() -> TestResult:
+    def mock_run() -> CommandResult:
         call_args = mock_git.apply_changes.call_args
         if call_args:
             applied_changes = call_args[0][0]
             if len(applied_changes) == 2:
-                return TestResult.FAIL
-            return TestResult.PASS
-        return TestResult.PASS
+                return CommandResult.FAIL
+            return CommandResult.PASS
+        return CommandResult.PASS
 
     mock_test_runner.run.side_effect = mock_run
 
@@ -208,15 +208,15 @@ def test_bifurcate_files_first_half_fails(
     engine = BifurcationEngine(mock_git, mock_test_runner)
     mock_git.apply_changes.return_value = True
 
-    def mock_run() -> TestResult:
+    def mock_run() -> CommandResult:
         call_args = mock_git.apply_changes.call_args
         if call_args:
             applied_changes = call_args[0][0]
             applied_ids = {c.id for c in applied_changes}
             if "1" in applied_ids:
-                return TestResult.FAIL
-            return TestResult.PASS
-        return TestResult.PASS
+                return CommandResult.FAIL
+            return CommandResult.PASS
+        return CommandResult.PASS
 
     mock_test_runner.run.side_effect = mock_run
 
@@ -240,15 +240,15 @@ def test_bifurcate_files_second_half_fails(
     engine = BifurcationEngine(mock_git, mock_test_runner)
     mock_git.apply_changes.return_value = True
 
-    def mock_run() -> TestResult:
+    def mock_run() -> CommandResult:
         call_args = mock_git.apply_changes.call_args
         if call_args:
             applied_changes = call_args[0][0]
             applied_ids = {c.id for c in applied_changes}
             if "2" in applied_ids:
-                return TestResult.FAIL
-            return TestResult.PASS
-        return TestResult.PASS
+                return CommandResult.FAIL
+            return CommandResult.PASS
+        return CommandResult.PASS
 
     mock_test_runner.run.side_effect = mock_run
 
@@ -281,15 +281,15 @@ def test_bifurcate_files_handles_skip(
 
     mock_git.apply_changes.side_effect = mock_apply
 
-    def mock_run() -> TestResult:
+    def mock_run() -> CommandResult:
         call_args = mock_git.apply_changes.call_args
         if call_args:
             applied_changes = call_args[0][0]
             applied_ids = {c.id for c in applied_changes}
             if "2" in applied_ids:
-                return TestResult.FAIL
-            return TestResult.PASS
-        return TestResult.PASS
+                return CommandResult.FAIL
+            return CommandResult.PASS
+        return CommandResult.PASS
 
     mock_test_runner.run.side_effect = mock_run
 
@@ -306,11 +306,11 @@ def test_get_stats(mock_git: MagicMock, mock_test_runner: MagicMock) -> None:
 
     # Manually populate tested_combinations
     engine.tested_combinations = {
-        "0,1": TestResult.PASS,
-        "2,3": TestResult.FAIL,
-        "0": TestResult.PASS,
-        "1": TestResult.SKIP,
-        "2": TestResult.ERROR,
+        "0,1": CommandResult.PASS,
+        "2,3": CommandResult.FAIL,
+        "0": CommandResult.PASS,
+        "1": CommandResult.SKIP,
+        "2": CommandResult.ERROR,
     }
 
     stats = engine.get_stats()
@@ -329,7 +329,7 @@ def test_bifurcate_files_verbose_output(
     engine = BifurcationEngine(mock_git, mock_test_runner)
 
     mock_git.apply_changes.return_value = True
-    mock_test_runner.run.return_value = TestResult.PASS
+    mock_test_runner.run.return_value = CommandResult.PASS
 
     # Capture output
     with patch("click.echo") as mock_echo:
@@ -349,7 +349,7 @@ def test_bifurcate_files_single_change(
 
     engine = BifurcationEngine(mock_git, mock_test_runner)
     mock_git.apply_changes.return_value = True
-    mock_test_runner.run.return_value = TestResult.FAIL
+    mock_test_runner.run.return_value = CommandResult.FAIL
 
     result = engine.bifurcate_files(changes, "base", verbose=False)
 
