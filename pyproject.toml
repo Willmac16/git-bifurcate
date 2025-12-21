@@ -56,6 +56,10 @@ select = [
 ]
 ignore = [
     "E501",   # line too long (handled by formatter)
+    "SIM103", # needless bool comparison - sometimes explicit is clearer
+    "SIM105", # contextlib.suppress - try/except/pass is often clearer
+    "SIM108", # ternary operators - if/else blocks are often more readable
+    "RUF005", # list concatenation is clear and readable
 ]
 
 [tool.ruff.format]

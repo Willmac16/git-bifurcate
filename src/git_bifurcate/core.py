@@ -2,7 +2,7 @@
 
 from __future__ import annotations
 
-from typing import TYPE_CHECKING
+from typing import TYPE_CHECKING, Any
 
 import click
 
@@ -117,9 +117,7 @@ class BifurcationEngine:
 
             else:  # SKIP or ERROR
                 if verbose:
-                    click.echo(
-                        f"  Result: {result.value} - trying upper half instead"
-                    )
+                    click.echo(f"  Result: {result.value} - trying upper half instead")
                 # Try upper half when lower half won't build
                 upper_result = self._test_changes(changes, base_commit, upper_half)
 
@@ -135,9 +133,7 @@ class BifurcationEngine:
                     search_space = upper_half
                 else:
                     # Both halves skip - complex dependency issue
-                    click.echo(
-                        "Error: Too many build failures. Possible dependency issues."
-                    )
+                    click.echo("Error: Too many build failures. Possible dependency issues.")
                     return None
 
         # Found single change
@@ -148,9 +144,7 @@ class BifurcationEngine:
 
             if result == CommandResult.FAIL:
                 if verbose:
-                    click.echo(
-                        f"\nFound breaking change after {iteration} iterations!"
-                    )
+                    click.echo(f"\nFound breaking change after {iteration} iterations!")
                 return changes[final_index]
             else:
                 if verbose:
@@ -178,6 +172,7 @@ class BifurcationEngine:
         """
         # Check cache
         from git_bifurcate.models import HunkChange
+
         cache_key = self._get_combination_key(indices)
         if cache_key in self.tested_combinations:
             return self.tested_combinations[cache_key]
@@ -186,7 +181,9 @@ class BifurcationEngine:
         selected_hunks: list[HunkChange] = [hunks[i] for i in indices]
 
         # Apply hunks (don't use temp branches to avoid state issues)
-        success = self.git.apply_hunk_changes(selected_hunks, base_commit, bad_commit, use_temp_branch=False)
+        success = self.git.apply_hunk_changes(
+            selected_hunks, base_commit, bad_commit, use_temp_branch=False
+        )
 
         if not success:
             # Failed to apply - likely dependency issues
@@ -219,7 +216,6 @@ class BifurcationEngine:
         Returns:
             The breaking HunkChange, or None if not found.
         """
-        from git_bifurcate.models import HunkChange
         search_space = list(range(len(hunks)))
         iteration = 0
 
@@ -250,9 +246,7 @@ class BifurcationEngine:
 
             else:  # SKIP or ERROR
                 if verbose:
-                    click.echo(
-                        f"  Result: {result.value} - trying upper half instead"
-                    )
+                    click.echo(f"  Result: {result.value} - trying upper half instead")
                 # Try upper half when lower half won't build
                 upper_result = self._test_hunk_changes(hunks, base_commit, bad_commit, upper_half)
 
@@ -268,9 +262,7 @@ class BifurcationEngine:
                     search_space = upper_half
                 else:
                     # Both halves skip - complex dependency issue
-                    click.echo(
-                        "Error: Too many build failures. Possible dependency issues."
-                    )
+                    click.echo("Error: Too many build failures. Possible dependency issues.")
                     return None
 
         # Found single hunk
@@ -281,9 +273,7 @@ class BifurcationEngine:
 
             if result == CommandResult.FAIL:
                 if verbose:
-                    click.echo(
-                        f"\nFound breaking hunk after {iteration} iterations!"
-                    )
+                    click.echo(f"\nFound breaking hunk after {iteration} iterations!")
                 return hunks[final_index]
             else:
                 if verbose:
@@ -303,16 +293,8 @@ class BifurcationEngine:
         """
         return {
             "tests_run": len(self.tested_combinations),
-            "passed": sum(
-                1 for r in self.tested_combinations.values() if r == CommandResult.PASS
-            ),
-            "failed": sum(
-                1 for r in self.tested_combinations.values() if r == CommandResult.FAIL
-            ),
-            "skipped": sum(
-                1 for r in self.tested_combinations.values() if r == CommandResult.SKIP
-            ),
-            "errors": sum(
-                1 for r in self.tested_combinations.values() if r == CommandResult.ERROR
-            ),
+            "passed": sum(1 for r in self.tested_combinations.values() if r == CommandResult.PASS),
+            "failed": sum(1 for r in self.tested_combinations.values() if r == CommandResult.FAIL),
+            "skipped": sum(1 for r in self.tested_combinations.values() if r == CommandResult.SKIP),
+            "errors": sum(1 for r in self.tested_combinations.values() if r == CommandResult.ERROR),
         }

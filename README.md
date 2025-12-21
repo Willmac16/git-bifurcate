@@ -1,5 +1,10 @@
 # git-bifurcate
 
+[![Tests](https://github.com/Willmac16/git-bifurcate/actions/workflows/test.yml/badge.svg)](https://github.com/Willmac16/git-bifurcate/actions/workflows/test.yml)
+[![Lint](https://github.com/Willmac16/git-bifurcate/actions/workflows/lint.yml/badge.svg)](https://github.com/Willmac16/git-bifurcate/actions/workflows/lint.yml)
+[![Build](https://github.com/Willmac16/git-bifurcate/actions/workflows/build.yml/badge.svg)](https://github.com/Willmac16/git-bifurcate/actions/workflows/build.yml)
+[![Python 3.12+](https://img.shields.io/badge/python-3.12+-blue.svg)](https://www.python.org/downloads/)
+
 **Find the exact change that broke your tests.**
 
 `git-bifurcate` extends `git bisect` to locate bugs at the file and hunk level within a single commit. When `git bisect` tells you which commit introduced a bug, `git-bifurcate` tells you which specific change in that commit caused it.

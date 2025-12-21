@@ -17,9 +17,7 @@ def create_commit(repo_path: Path, filename: str, content: str, message: str) ->
     file_path.write_text(content)
 
     subprocess.run(["git", "add", filename], cwd=repo_path, check=True, capture_output=True)
-    subprocess.run(
-        ["git", "commit", "-m", message], cwd=repo_path, check=True, capture_output=True
-    )
+    subprocess.run(["git", "commit", "-m", message], cwd=repo_path, check=True, capture_output=True)
 
     result = subprocess.run(
         ["git", "rev-parse", "HEAD"], cwd=repo_path, check=True, capture_output=True, text=True
@@ -153,9 +151,7 @@ def test_get_diff_multiple_files(git_repo: Path) -> None:
     (git_repo / "file1.txt").write_text("modified1")
     (git_repo / "file2.txt").write_text("content2")
     subprocess.run(["git", "add", "."], cwd=git_repo, check=True, capture_output=True)
-    subprocess.run(
-        ["git", "commit", "-m", "Child"], cwd=git_repo, check=True, capture_output=True
-    )
+    subprocess.run(["git", "commit", "-m", "Child"], cwd=git_repo, check=True, capture_output=True)
 
     result = subprocess.run(
         ["git", "rev-parse", "HEAD"], cwd=git_repo, check=True, capture_output=True, text=True
@@ -287,7 +283,7 @@ index 0000000..1111111 100644
 def test_reset_hard(git_repo: Path) -> None:
     """Test hard reset to a commit."""
     sha1 = create_commit(git_repo, "test.txt", "v1", "Commit 1")
-    sha2 = create_commit(git_repo, "test.txt", "v2", "Commit 2")
+    _sha2 = create_commit(git_repo, "test.txt", "v2", "Commit 2")
 
     # Make uncommitted changes
     (git_repo / "test.txt").write_text("v3")
@@ -331,9 +327,7 @@ def test_apply_changes(git_repo: Path) -> None:
     # Create child commit with a simple modification
     (git_repo / "file1.txt").write_text("modified1\n")
     subprocess.run(["git", "add", "file1.txt"], cwd=git_repo, check=True, capture_output=True)
-    subprocess.run(
-        ["git", "commit", "-m", "Child"], cwd=git_repo, check=True, capture_output=True
-    )
+    subprocess.run(["git", "commit", "-m", "Child"], cwd=git_repo, check=True, capture_output=True)
 
     result = subprocess.run(
         ["git", "rev-parse", "HEAD"], cwd=git_repo, check=True, capture_output=True, text=True
@@ -368,9 +362,7 @@ def test_apply_changes_multiple(git_repo: Path) -> None:
     (git_repo / "file1.txt").write_text("modified1\n")
     (git_repo / "file2.txt").write_text("content2\n")
     subprocess.run(["git", "add", "."], cwd=git_repo, check=True, capture_output=True)
-    subprocess.run(
-        ["git", "commit", "-m", "Child"], cwd=git_repo, check=True, capture_output=True
-    )
+    subprocess.run(["git", "commit", "-m", "Child"], cwd=git_repo, check=True, capture_output=True)
 
     result = subprocess.run(
         ["git", "rev-parse", "HEAD"], cwd=git_repo, check=True, capture_output=True, text=True
@@ -415,7 +407,6 @@ def test_apply_changes_invalid_patch(git_repo: Path) -> None:
     # Should fail gracefully
     success = repo.apply_changes([invalid_change], parent_sha, use_temp_branch=False)
     assert not success
-
 
     # Get branch count before
     result = subprocess.run(
@@ -502,7 +493,9 @@ def test_apply_hunk_changes_empty_list(git_repo: Path) -> None:
     assert success
 
 
-def test_apply_hunk_changes_missing_file_header(git_repo: Path, monkeypatch: pytest.MonkeyPatch) -> None:
+def test_apply_hunk_changes_missing_file_header(
+    git_repo: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
     """Test apply_hunk_changes when file header extraction fails."""
     from git_bifurcate.models import HunkChange
 

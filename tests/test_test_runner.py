@@ -5,8 +5,6 @@ from __future__ import annotations
 import subprocess
 from unittest.mock import MagicMock, patch
 
-import pytest
-
 from git_bifurcate.models import CommandResult
 from git_bifurcate.test_runner import CommandRunner
 
