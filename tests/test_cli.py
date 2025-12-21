@@ -209,7 +209,7 @@ def test_cli_start_file_strategy_integration(
     from conftest import get_commit_shas
 
     os.chdir(simple_fixture)
-    parent_sha, bad_sha = get_commit_shas(simple_fixture)
+    _parent_sha, bad_sha = get_commit_shas(simple_fixture)
 
     result = runner.invoke(
         main,
@@ -232,7 +232,7 @@ def test_cli_start_hunk_strategy_integration(
     from conftest import get_commit_shas
 
     os.chdir(hunk_fixture)
-    parent_sha, bad_sha = get_commit_shas(hunk_fixture)
+    _parent_sha, bad_sha = get_commit_shas(hunk_fixture)
 
     result = runner.invoke(
         main,
