@@ -377,6 +377,11 @@ class GitRepo:
             True if changes applied successfully, False otherwise.
         """
         if not hunks:
+            # Ensure repository is on the base commit before running tests
+            try:
+                self.reset_hard(base_commit)
+            except GitOperationError:
+                return False
             return True
 
         original_ref = None
