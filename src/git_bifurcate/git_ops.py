@@ -30,7 +30,8 @@ class GitRepo:
         """
         try:
             self.repo = git.Repo(repo_path, search_parent_directories=True)
-            self.repo_path = Path(self.repo.working_dir)
+            # Resolve the repository path to eliminate any symlink prefixes (e.g., /private on macOS)
+            self.repo_path = Path(self.repo.working_dir).resolve()
         except git.InvalidGitRepositoryError as e:
             msg = f"Not a git repository: {repo_path}"
             raise GitOperationError(msg) from e
