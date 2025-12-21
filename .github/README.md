@@ -132,7 +132,8 @@ uv run ruff check src tests
 # Run formatter
 uv run ruff format src tests
 
-# Run type checker
+# Run type checkers
+uv run ty check
 uv run mypy src
 
 # Build package
