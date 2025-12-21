@@ -6,15 +6,12 @@ import os
 import subprocess
 from pathlib import Path
 
-import pytest
-
 from conftest import get_commit_shas
 
 from git_bifurcate.core import BifurcationEngine
 from git_bifurcate.git_ops import GitRepo
 from git_bifurcate.parser import parse_file_changes, parse_hunk_changes
 from git_bifurcate.test_runner import CommandRunner
-
 
 
 def test_simple_fixture_setup(simple_fixture: Path) -> None:
