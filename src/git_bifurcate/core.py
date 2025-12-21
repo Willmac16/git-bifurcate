@@ -53,8 +53,8 @@ class BifurcationEngine:
         # Select changes to test
         selected_changes = [changes[i] for i in indices]
 
-        # Apply changes
-        success = self.git.apply_changes(selected_changes, base_commit)
+        # Apply changes (don't use temp branches to avoid state issues)
+        success = self.git.apply_changes(selected_changes, base_commit, use_temp_branch=False)
 
         if not success:
             # Failed to apply - likely dependency issues
@@ -65,6 +65,12 @@ class BifurcationEngine:
 
         # Cache result
         self.tested_combinations[cache_key] = result
+
+        # Always checkout base commit for next iteration (non-destructive)
+        try:
+            self.git.checkout(base_commit)
+        except Exception:
+            pass
 
         return result
 
