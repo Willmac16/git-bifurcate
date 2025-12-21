@@ -171,8 +171,6 @@ class BifurcationEngine:
             CommandResult from running tests.
         """
         # Check cache
-        from git_bifurcate.models import HunkChange
-
         cache_key = self._get_combination_key(indices)
         if cache_key in self.tested_combinations:
             return self.tested_combinations[cache_key]
