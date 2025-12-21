@@ -3,12 +3,13 @@
 from __future__ import annotations
 
 import sys
+from typing import cast
 
 import click
 
 from git_bifurcate.core import BifurcationEngine
 from git_bifurcate.git_ops import GitRepo
-from git_bifurcate.models import BifurcationState, CommandResult, Strategy
+from git_bifurcate.models import BifurcationState, CommandResult, FileChange, HunkChange, Strategy
 from git_bifurcate.parser import parse_file_changes, parse_hunk_changes
 from git_bifurcate.test_runner import CommandRunner
 
@@ -96,150 +97,239 @@ def start(commit: str | None, test: str, strategy: str, parent: str | None) -> N
         strategy_enum = Strategy(strategy.lower())
 
         if strategy_enum == Strategy.FILE:
-            changes = parse_file_changes(diff_text)
-            click.echo(f"Found {len(changes)} file-level changes")
+            file_changes = parse_file_changes(diff_text)
+            click.echo(f"Found {len(file_changes)} file-level changes")
+
+            if not file_changes:
+                click.echo("Error: No changes found in commit")
+                sys.exit(1)
+
+            # Display changes
+            click.echo("\nChanges to bifurcate:")
+            for i, change in enumerate(file_changes):
+                click.echo(f"  [{i}] {change.file_path} ({change.change_type})")
+            click.echo()
+
+            # First, verify that all changes together reproduce the failure
+            click.echo("Verifying that all changes together fail the test...")
+            test_runner = CommandRunner(test)
+            engine = BifurcationEngine(git, test_runner)
+
+            all_indices = list(range(len(file_changes)))
+            result = engine._test_changes(file_changes, parent_sha, all_indices)
+
+            if result != CommandResult.FAIL:
+                click.echo(f"\nError: Expected test to FAIL with all changes, but got {result.value}")
+                click.echo("The commit you're bifurcating should fail tests.")
+                click.echo("Please verify:")
+                click.echo(f"  1. Tests pass at parent commit: {parent_sha[:8]}")
+                click.echo(f"  2. Tests fail at target commit: {commit_sha[:8]}")
+                click.echo(f"  3. Test command is correct: {test}")
+                sys.exit(1)
+
+            click.echo("✓ Confirmed: All changes together fail the test")
+            click.echo()
+
+            # Verify that no changes passes
+            click.echo("Verifying that parent commit passes the test...")
+            result = engine._test_changes(file_changes, parent_sha, [])
+
+            if result != CommandResult.PASS:
+                click.echo(f"\nError: Expected test to PASS with no changes, but got {result.value}")
+                click.echo("The parent commit should pass tests.")
+                sys.exit(1)
+
+            click.echo("✓ Confirmed: No changes (parent commit) passes the test")
+            click.echo()
+
+            # Create initial state
+            state = BifurcationState(
+                commit_sha=commit_sha,
+                parent_sha=parent_sha,
+                test_command=test,
+                strategy=strategy_enum,
+                changes=cast(list[FileChange | HunkChange], file_changes),
+                search_space=list(range(len(file_changes))),
+            )
+            state.save()
+
+            # Start bifurcation
+            click.echo("=" * 60)
+            click.echo("Starting binary search...")
+            click.echo("=" * 60)
+            click.echo()
+
+            breaking_change = engine.bifurcate_files(file_changes, parent_sha, verbose=True)
+
+            if breaking_change:
+                click.echo()
+                click.echo("=" * 60)
+                click.echo("BREAKING CHANGE FOUND!")
+                click.echo("=" * 60)
+                click.echo()
+                click.echo(f"File: {breaking_change.file_path}")
+                click.echo(f"Type: {breaking_change.change_type}")
+                click.echo()
+                click.echo("Diff content:")
+                click.echo("-" * 60)
+                click.echo(breaking_change.diff_content)
+                click.echo("-" * 60)
+                click.echo()
+
+                # Show stats
+                stats = engine.get_stats()
+                click.echo("Statistics:")
+                click.echo(f"  Total tests run: {stats['tests_run']}")
+                click.echo(f"  Passed: {stats['passed']}")
+                click.echo(f"  Failed: {stats['failed']}")
+                click.echo(f"  Skipped: {stats['skipped']}")
+                click.echo(f"  Errors: {stats['errors']}")
+
+                # Clean up
+                click.echo()
+                click.echo("Cleaning up...")
+                git.reset_hard(commit_sha)
+                BifurcationState.delete()
+                click.echo("✓ Done")
+            else:
+                click.echo()
+                click.echo("=" * 60)
+                click.echo("NO SINGLE BREAKING CHANGE FOUND")
+                click.echo("=" * 60)
+                click.echo()
+                click.echo("This could mean:")
+                click.echo("  1. Multiple changes interact to cause the failure")
+                click.echo("  2. Dependency issues between changes")
+                click.echo("  3. The test is nondeterministic")
+                click.echo()
+
+                # Show stats
+                stats = engine.get_stats()
+                click.echo("Statistics:")
+                click.echo(f"  Total tests run: {stats['tests_run']}")
+
+                # Clean up
+                git.reset_hard(commit_sha)
+                BifurcationState.delete()
         elif strategy_enum == Strategy.HUNK:
-            changes = parse_hunk_changes(diff_text)
-            click.echo(f"Found {len(changes)} hunk-level changes")
+            hunk_changes = parse_hunk_changes(diff_text)
+            click.echo(f"Found {len(hunk_changes)} hunk-level changes")
+
+            if not hunk_changes:
+                click.echo("Error: No changes found in commit")
+                sys.exit(1)
+
+            # Display changes
+            click.echo("\nChanges to bifurcate:")
+            for i, change in enumerate(hunk_changes):
+                click.echo(f"  [{i}] {change.file_path}:{change.start_line}-{change.end_line}")
+            click.echo()
+
+            # First, verify that all changes together reproduce the failure
+            click.echo("Verifying that all changes together fail the test...")
+            test_runner = CommandRunner(test)
+            engine = BifurcationEngine(git, test_runner)
+
+            all_indices = list(range(len(hunk_changes)))
+            result = engine._test_hunk_changes(hunk_changes, parent_sha, commit_sha, all_indices)
+
+            if result != CommandResult.FAIL:
+                click.echo(f"\nError: Expected test to FAIL with all changes, but got {result.value}")
+                click.echo("The commit you're bifurcating should fail tests.")
+                click.echo("Please verify:")
+                click.echo(f"  1. Tests pass at parent commit: {parent_sha[:8]}")
+                click.echo(f"  2. Tests fail at target commit: {commit_sha[:8]}")
+                click.echo(f"  3. Test command is correct: {test}")
+                sys.exit(1)
+
+            click.echo("✓ Confirmed: All changes together fail the test")
+            click.echo()
+
+            # Verify that no changes passes
+            click.echo("Verifying that parent commit passes the test...")
+            result = engine._test_hunk_changes(hunk_changes, parent_sha, commit_sha, [])
+
+            if result != CommandResult.PASS:
+                click.echo(f"\nError: Expected test to PASS with no changes, but got {result.value}")
+                click.echo("The parent commit should pass tests.")
+                sys.exit(1)
+
+            click.echo("✓ Confirmed: No changes (parent commit) passes the test")
+            click.echo()
+
+            # Create initial state
+            state = BifurcationState(
+                commit_sha=commit_sha,
+                parent_sha=parent_sha,
+                test_command=test,
+                strategy=strategy_enum,
+                changes=cast(list[FileChange | HunkChange], hunk_changes),
+                search_space=list(range(len(hunk_changes))),
+            )
+            state.save()
+
+            # Start bifurcation
+            click.echo("=" * 60)
+            click.echo("Starting binary search...")
+            click.echo("=" * 60)
+            click.echo()
+
+            breaking_change = engine.bifurcate_hunks(hunk_changes, parent_sha, commit_sha, verbose=True)
+
+            if breaking_change:
+                click.echo()
+                click.echo("=" * 60)
+                click.echo("BREAKING CHANGE FOUND!")
+                click.echo("=" * 60)
+                click.echo()
+                click.echo(f"File: {breaking_change.file_path}")
+                click.echo(f"Lines: {breaking_change.start_line}-{breaking_change.end_line}")
+                click.echo()
+                click.echo("Diff content:")
+                click.echo("-" * 60)
+                click.echo(breaking_change.diff_content)
+                click.echo("-" * 60)
+                click.echo()
+
+                # Show stats
+                stats = engine.get_stats()
+                click.echo("Statistics:")
+                click.echo(f"  Total tests run: {stats['tests_run']}")
+                click.echo(f"  Passed: {stats['passed']}")
+                click.echo(f"  Failed: {stats['failed']}")
+                click.echo(f"  Skipped: {stats['skipped']}")
+                click.echo(f"  Errors: {stats['errors']}")
+
+                # Clean up
+                click.echo()
+                click.echo("Cleaning up...")
+                git.reset_hard(commit_sha)
+                BifurcationState.delete()
+                click.echo("✓ Done")
+            else:
+                click.echo()
+                click.echo("=" * 60)
+                click.echo("NO SINGLE BREAKING CHANGE FOUND")
+                click.echo("=" * 60)
+                click.echo()
+                click.echo("This could mean:")
+                click.echo("  1. Multiple changes interact to cause the failure")
+                click.echo("  2. Dependency issues between changes")
+                click.echo("  3. The test is nondeterministic")
+                click.echo()
+
+                # Show stats
+                stats = engine.get_stats()
+                click.echo("Statistics:")
+                click.echo(f"  Total tests run: {stats['tests_run']}")
+
+                # Clean up
+                git.reset_hard(commit_sha)
+                BifurcationState.delete()
         else:  # HYBRID
             click.echo("Error: Hybrid strategy not yet implemented")
             click.echo("Please use --strategy=file or --strategy=hunk")
             sys.exit(1)
-
-        if not changes:
-            click.echo("Error: No changes found in commit")
-            sys.exit(1)
-
-        # Display changes
-        click.echo("\nChanges to bifurcate:")
-        for i, change in enumerate(changes):
-            if hasattr(change, "start_line"):
-                # HunkChange
-                click.echo(f"  [{i}] {change.file_path}:{change.start_line}-{change.end_line}")
-            else:
-                # FileChange
-                click.echo(f"  [{i}] {change.file_path} ({change.change_type})")
-        click.echo()
-
-        # First, verify that all changes together reproduce the failure
-        click.echo("Verifying that all changes together fail the test...")
-        test_runner = CommandRunner(test)
-        engine = BifurcationEngine(git, test_runner)
-
-        all_indices = list(range(len(changes)))
-        if strategy_enum == Strategy.HUNK:
-            result = engine._test_hunk_changes(changes, parent_sha, commit_sha, all_indices)
-        else:
-            result = engine._test_changes(changes, parent_sha, all_indices)
-
-        if result != CommandResult.FAIL:
-            click.echo(f"\nError: Expected test to FAIL with all changes, but got {result.value}")
-            click.echo("The commit you're bifurcating should fail tests.")
-            click.echo("Please verify:")
-            click.echo(f"  1. Tests pass at parent commit: {parent_sha[:8]}")
-            click.echo(f"  2. Tests fail at target commit: {commit_sha[:8]}")
-            click.echo(f"  3. Test command is correct: {test}")
-            sys.exit(1)
-
-        click.echo("✓ Confirmed: All changes together fail the test")
-        click.echo()
-
-        # Verify that no changes passes
-        click.echo("Verifying that parent commit passes the test...")
-        if strategy_enum == Strategy.HUNK:
-            result = engine._test_hunk_changes(changes, parent_sha, commit_sha, [])
-        else:
-            result = engine._test_changes(changes, parent_sha, [])
-
-        if result != CommandResult.PASS:
-            click.echo(f"\nError: Expected test to PASS with no changes, but got {result.value}")
-            click.echo("The parent commit should pass tests.")
-            sys.exit(1)
-
-        click.echo("✓ Confirmed: No changes (parent commit) passes the test")
-        click.echo()
-
-        # Create initial state
-        state = BifurcationState(
-            commit_sha=commit_sha,
-            parent_sha=parent_sha,
-            test_command=test,
-            strategy=strategy_enum,
-            changes=changes,
-            search_space=list(range(len(changes))),
-        )
-        state.save()
-
-        # Start bifurcation
-        click.echo("=" * 60)
-        click.echo("Starting binary search...")
-        click.echo("=" * 60)
-        click.echo()
-
-        if strategy_enum == Strategy.HUNK:
-            breaking_change = engine.bifurcate_hunks(changes, parent_sha, commit_sha, verbose=True)
-        else:
-            breaking_change = engine.bifurcate_files(changes, parent_sha, verbose=True)
-
-        if breaking_change:
-            click.echo()
-            click.echo("=" * 60)
-            click.echo("BREAKING CHANGE FOUND!")
-            click.echo("=" * 60)
-            click.echo()
-
-            if hasattr(breaking_change, "start_line"):
-                # HunkChange
-                click.echo(f"File: {breaking_change.file_path}")
-                click.echo(f"Lines: {breaking_change.start_line}-{breaking_change.end_line}")
-            else:
-                # FileChange
-                click.echo(f"File: {breaking_change.file_path}")
-                click.echo(f"Type: {breaking_change.change_type}")
-
-            click.echo()
-            click.echo("Diff content:")
-            click.echo("-" * 60)
-            click.echo(breaking_change.diff_content)
-            click.echo("-" * 60)
-            click.echo()
-
-            # Show stats
-            stats = engine.get_stats()
-            click.echo("Statistics:")
-            click.echo(f"  Total tests run: {stats['tests_run']}")
-            click.echo(f"  Passed: {stats['passed']}")
-            click.echo(f"  Failed: {stats['failed']}")
-            click.echo(f"  Skipped: {stats['skipped']}")
-            click.echo(f"  Errors: {stats['errors']}")
-
-            # Clean up
-            click.echo()
-            click.echo("Cleaning up...")
-            git.reset_hard(commit_sha)
-            BifurcationState.delete()
-            click.echo("✓ Done")
-        else:
-            click.echo()
-            click.echo("=" * 60)
-            click.echo("NO SINGLE BREAKING CHANGE FOUND")
-            click.echo("=" * 60)
-            click.echo()
-            click.echo("This could mean:")
-            click.echo("  1. Multiple changes interact to cause the failure")
-            click.echo("  2. Dependency issues between changes")
-            click.echo("  3. The test is nondeterministic")
-            click.echo()
-            click.echo("Try:")
-            click.echo("  - Using --strategy=hunk for finer granularity")
-            click.echo("  - Running the test multiple times to check for flakiness")
-            click.echo("  - Manually reviewing the changes")
-
-            # Clean up
-            click.echo()
-            click.echo("Cleaning up...")
-            git.reset_hard(commit_sha)
-            BifurcationState.delete()
 
     except FileNotFoundError as e:
         click.echo(f"Error: {e}")
@@ -290,7 +380,7 @@ def status() -> None:
             click.echo("Breaking changes found:")
             for idx in state.found_breaking:
                 change = state.changes[idx]
-                if hasattr(change, "start_line"):
+                if isinstance(change, HunkChange):
                     click.echo(
                         f"  [{idx}] {change.file_path}:{change.start_line}-{change.end_line}"
                     )
