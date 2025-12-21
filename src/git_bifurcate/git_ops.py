@@ -267,7 +267,11 @@ class GitRepo:
         return success
 
     def apply_hunk_changes(
-        self, hunks: list[HunkChange], base_commit: str, bad_commit: str, use_temp_branch: bool = True
+        self,
+        hunks: list[HunkChange],
+        base_commit: str,
+        bad_commit: str,
+        use_temp_branch: bool = True,
     ) -> bool:
         """Apply a subset of hunk changes.
 
@@ -308,6 +312,7 @@ class GitRepo:
 
         # Group hunks by file
         from collections import defaultdict
+
         hunks_by_file: dict[str, list[HunkChange]] = defaultdict(list)
         for hunk in hunks:
             hunks_by_file[hunk.file_path].append(hunk)

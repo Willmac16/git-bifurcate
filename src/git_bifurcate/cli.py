@@ -3,7 +3,6 @@
 from __future__ import annotations
 
 import sys
-from pathlib import Path
 
 import click
 
@@ -116,9 +115,7 @@ def start(commit: str | None, test: str, strategy: str, parent: str | None) -> N
         for i, change in enumerate(changes):
             if hasattr(change, "start_line"):
                 # HunkChange
-                click.echo(
-                    f"  [{i}] {change.file_path}:{change.start_line}-{change.end_line}"
-                )
+                click.echo(f"  [{i}] {change.file_path}:{change.start_line}-{change.end_line}")
             else:
                 # FileChange
                 click.echo(f"  [{i}] {change.file_path} ({change.change_type})")
@@ -209,7 +206,7 @@ def start(commit: str | None, test: str, strategy: str, parent: str | None) -> N
 
             # Show stats
             stats = engine.get_stats()
-            click.echo(f"Statistics:")
+            click.echo("Statistics:")
             click.echo(f"  Total tests run: {stats['tests_run']}")
             click.echo(f"  Passed: {stats['passed']}")
             click.echo(f"  Failed: {stats['failed']}")
@@ -294,7 +291,9 @@ def status() -> None:
             for idx in state.found_breaking:
                 change = state.changes[idx]
                 if hasattr(change, "start_line"):
-                    click.echo(f"  [{idx}] {change.file_path}:{change.start_line}-{change.end_line}")
+                    click.echo(
+                        f"  [{idx}] {change.file_path}:{change.start_line}-{change.end_line}"
+                    )
                 else:
                     click.echo(f"  [{idx}] {change.file_path}")
 

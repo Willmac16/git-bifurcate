@@ -8,7 +8,7 @@ import pytest
 
 from git_bifurcate.core import BifurcationEngine
 from git_bifurcate.git_ops import GitRepo
-from git_bifurcate.models import ChangeStatus, FileChange, CommandResult
+from git_bifurcate.models import ChangeStatus, CommandResult, FileChange
 from git_bifurcate.test_runner import CommandRunner
 
 
@@ -194,9 +194,7 @@ def test_bifurcate_files_interaction_effect(
     assert result is None
 
 
-def test_bifurcate_files_first_half_fails(
-    mock_git: MagicMock, mock_test_runner: MagicMock
-) -> None:
+def test_bifurcate_files_first_half_fails(mock_git: MagicMock, mock_test_runner: MagicMock) -> None:
     """Test binary search when first half contains bug."""
     changes = [
         FileChange("0", "file1.py", "modified", "diff1", ChangeStatus.UNKNOWN),
@@ -258,9 +256,7 @@ def test_bifurcate_files_second_half_fails(
     assert result.id == "2"
 
 
-def test_bifurcate_files_handles_skip(
-    mock_git: MagicMock, mock_test_runner: MagicMock
-) -> None:
+def test_bifurcate_files_handles_skip(mock_git: MagicMock, mock_test_runner: MagicMock) -> None:
     """Test handling of SKIP results from dependency issues."""
     changes = [
         FileChange("0", "file1.py", "modified", "diff1", ChangeStatus.UNKNOWN),
@@ -272,7 +268,9 @@ def test_bifurcate_files_handles_skip(
     engine = BifurcationEngine(mock_git, mock_test_runner)
 
     # Simulate: first half can't be applied (dependencies), second half has bug
-    def mock_apply(applied_changes: list[FileChange], base: str, use_temp_branch: bool = True) -> bool:
+    def mock_apply(
+        applied_changes: list[FileChange], base: str, use_temp_branch: bool = True
+    ) -> bool:
         applied_ids = {c.id for c in applied_changes}
         # First half (0, 1) can't be applied
         if applied_ids == {"0", "1"}:
@@ -322,7 +320,7 @@ def test_get_stats(mock_git: MagicMock, mock_test_runner: MagicMock) -> None:
     assert stats["errors"] == 1
 
 
-def test_bifurcate_files_verbose_output(
+def test_bifurcate_files_verbose_mode_basic(
     mock_git: MagicMock, mock_test_runner: MagicMock, sample_changes: list[FileChange]
 ) -> None:
     """Test that verbose mode produces output."""
@@ -339,9 +337,7 @@ def test_bifurcate_files_verbose_output(
         assert mock_echo.call_count > 0
 
 
-def test_bifurcate_files_single_change(
-    mock_git: MagicMock, mock_test_runner: MagicMock
-) -> None:
+def test_bifurcate_files_single_change(mock_git: MagicMock, mock_test_runner: MagicMock) -> None:
     """Test bifurcation with single change."""
     changes = [
         FileChange("0", "file1.py", "modified", "diff1", ChangeStatus.UNKNOWN),
@@ -357,9 +353,7 @@ def test_bifurcate_files_single_change(
     assert result.id == "0"
 
 
-def test_bifurcate_files_empty_changes(
-    mock_git: MagicMock, mock_test_runner: MagicMock
-) -> None:
+def test_bifurcate_files_empty_changes(mock_git: MagicMock, mock_test_runner: MagicMock) -> None:
     """Test bifurcation with no changes."""
     changes: list[FileChange] = []
 
@@ -422,7 +416,9 @@ def test_bifurcate_files_skip_warning(
 
     engine = BifurcationEngine(mock_git, mock_test_runner)
 
-    def mock_apply(applied_changes: list[FileChange], base: str, use_temp_branch: bool = True) -> bool:
+    def mock_apply(
+        applied_changes: list[FileChange], base: str, use_temp_branch: bool = True
+    ) -> bool:
         applied_ids = {c.id for c in applied_changes}
         # Lower half can't be applied
         if applied_ids == {"0", "1"}:
@@ -518,7 +514,7 @@ def test_bifurcate_hunks_verbose_output(
 
     mock_test_runner.run.side_effect = mock_run
 
-    result = engine.bifurcate_hunks(hunks, "base", "bad", verbose=True)
+    _result = engine.bifurcate_hunks(hunks, "base", "bad", verbose=True)
 
     # Check verbose output
     captured = capsys.readouterr()

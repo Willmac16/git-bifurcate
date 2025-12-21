@@ -10,10 +10,10 @@ import pytest
 from git_bifurcate.models import (
     BifurcationState,
     ChangeStatus,
+    CommandResult,
     FileChange,
     HunkChange,
     Strategy,
-    CommandResult,
 )
 
 

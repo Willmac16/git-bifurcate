@@ -2,8 +2,6 @@
 
 from __future__ import annotations
 
-import pytest
-
 from git_bifurcate.models import ChangeStatus
 from git_bifurcate.parser import (
     get_file_hunks,
