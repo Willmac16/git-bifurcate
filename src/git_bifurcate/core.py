@@ -2,7 +2,7 @@
 
 from __future__ import annotations
 
-from typing import TYPE_CHECKING, Any
+from typing import TYPE_CHECKING
 
 import click
 
@@ -11,7 +11,7 @@ from git_bifurcate.models import CommandResult
 from git_bifurcate.test_runner import CommandRunner
 
 if TYPE_CHECKING:
-    from git_bifurcate.models import FileChange
+    from git_bifurcate.models import FileChange, HunkChange
 
 
 class BifurcationEngine:
@@ -157,7 +157,7 @@ class BifurcationEngine:
         return None
 
     def _test_hunk_changes(
-        self, hunks: list, base_commit: str, bad_commit: str, indices: list[int]
+        self, hunks: list[HunkChange], base_commit: str, bad_commit: str, indices: list[int]
     ) -> CommandResult:
         """Test a specific combination of hunk changes.
 
@@ -203,8 +203,8 @@ class BifurcationEngine:
         return result
 
     def bifurcate_hunks(
-        self, hunks: list, base_commit: str, bad_commit: str, verbose: bool = True
-    ) -> Any | None:
+        self, hunks: list[HunkChange], base_commit: str, bad_commit: str, verbose: bool = True
+    ) -> HunkChange | None:
         """Binary search through hunk changes to find breaking change.
 
         Args:
