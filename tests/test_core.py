@@ -869,3 +869,96 @@ def test_report_interaction_outputs(monkeypatch: pytest.MonkeyPatch) -> None:
     with patch("click.echo") as echo:
         engine._report_interaction(hunk_changes, "base", verbose=True, bad_commit="bad")
         assert any("f.py" in call.args[0] for call in echo.call_args_list)
+
+
+def test_get_average_test_time(mock_git: MagicMock, mock_test_runner: MagicMock) -> None:
+    """Test average test time calculation."""
+    engine = BifurcationEngine(mock_git, mock_test_runner)
+
+    # No tests run yet
+    assert engine.get_average_test_time() == 0.0
+
+    # Add some test times
+    engine.test_times = [1.0, 2.0, 3.0]
+    assert engine.get_average_test_time() == 2.0
+
+    # Single test
+    engine.test_times = [5.5]
+    assert engine.get_average_test_time() == 5.5
+
+
+def test_estimate_remaining_iterations(mock_git: MagicMock, mock_test_runner: MagicMock) -> None:
+    """Test remaining iterations estimation."""
+    engine = BifurcationEngine(mock_git, mock_test_runner)
+
+    # Empty search space
+    assert engine.estimate_remaining_iterations(0) == 0
+    assert engine.estimate_remaining_iterations(1) == 0
+
+    # Binary search iterations
+    assert engine.estimate_remaining_iterations(2) == 1
+    assert engine.estimate_remaining_iterations(4) == 2
+    assert engine.estimate_remaining_iterations(8) == 3
+    assert engine.estimate_remaining_iterations(16) == 4
+    assert engine.estimate_remaining_iterations(32) == 5
+
+
+def test_estimate_remaining_time(mock_git: MagicMock, mock_test_runner: MagicMock) -> None:
+    """Test remaining time estimation."""
+    engine = BifurcationEngine(mock_git, mock_test_runner)
+
+    # No test times yet
+    assert engine.estimate_remaining_time(16) == 0.0
+
+    # With test times
+    engine.test_times = [1.0, 2.0, 3.0]  # avg = 2.0
+    # 16 elements = 4 iterations, 2 tests per iteration, 2.0s per test
+    expected = 4 * 2 * 2.0
+    assert engine.estimate_remaining_time(16) == expected
+
+    # Small search space
+    engine.test_times = [1.0]
+    assert engine.estimate_remaining_time(2) == 2.0  # 1 iter * 2 tests * 1.0s
+
+
+def test_format_time() -> None:
+    """Test time formatting."""
+    # Less than 1 second
+    assert BifurcationEngine.format_time(0.5) == "< 1s"
+
+    # Seconds only
+    assert BifurcationEngine.format_time(30) == "30s"
+    assert BifurcationEngine.format_time(59) == "59s"
+
+    # Minutes and seconds
+    assert BifurcationEngine.format_time(90) == "1m 30s"
+    assert BifurcationEngine.format_time(150) == "2m 30s"
+
+    # Hours, minutes, and seconds
+    assert BifurcationEngine.format_time(3661) == "1h 1m 1s"
+    assert BifurcationEngine.format_time(3600) == "1h"
+    assert BifurcationEngine.format_time(7200) == "2h"
+
+    # Hours and minutes (no seconds)
+    assert BifurcationEngine.format_time(3660) == "1h 1m"
+
+
+def test_get_stats_with_timing(mock_git: MagicMock, mock_test_runner: MagicMock) -> None:
+    """Test stats include timing information."""
+    engine = BifurcationEngine(mock_git, mock_test_runner)
+
+    # Add some test results
+    engine.tested_combinations = {
+        "0": CommandResult.PASS,
+        "1": CommandResult.FAIL,
+        "2": CommandResult.SKIP,
+    }
+    engine.test_times = [1.0, 2.0, 3.0]
+
+    stats = engine.get_stats()
+    assert stats["tests_run"] == 3
+    assert stats["passed"] == 1
+    assert stats["failed"] == 1
+    assert stats["skipped"] == 1
+    assert stats["avg_test_time"] == 2.0
+    assert stats["total_test_time"] == 6.0

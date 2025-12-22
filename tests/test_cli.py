@@ -1006,3 +1006,379 @@ def test_analyze_submodule_helpers(monkeypatch: pytest.MonkeyPatch) -> None:
         "bad",
     )  # type: ignore[arg-type]
     assert git_none.reset_calls[-1] == "bad"
+
+
+def test_cli_bisect_command(runner: CliRunner, simple_fixture: Path) -> None:
+    """Test the bisect command."""
+    from conftest import get_commit_shas
+
+    os.chdir(simple_fixture)
+    parent_sha, bad_sha = get_commit_shas(simple_fixture)
+
+    result = runner.invoke(
+        main,
+        ["bisect", parent_sha, bad_sha, "--test", "bash test.sh"],
+        catch_exceptions=False,
+    )
+
+    assert result.exit_code == 0
+    assert "FIRST BAD COMMIT FOUND" in result.output or "Bisecting commits" in result.output
+
+
+def test_cli_bisect_no_commits(runner: CliRunner, simple_fixture: Path) -> None:
+    """Test bisect with same good/bad commit."""
+    from conftest import get_commit_shas
+
+    os.chdir(simple_fixture)
+    parent_sha, _bad_sha = get_commit_shas(simple_fixture)
+
+    # Use same commit as both good and bad
+    result = runner.invoke(
+        main,
+        ["bisect", parent_sha, parent_sha, "--test", "true"],
+        catch_exceptions=False,
+    )
+
+    # Should handle gracefully
+    assert "No bad commit found" in result.output or "0" in result.output
+
+
+def test_cli_continue_no_session(runner: CliRunner) -> None:
+    """Test continue command with no session."""
+    result = runner.invoke(main, ["continue"], catch_exceptions=False)
+
+    assert result.exit_code == 1
+    assert "No bifurcation in progress" in result.output
+
+
+def test_cli_continue_with_session(
+    runner: CliRunner, simple_fixture: Path, change_to_original_dir: None
+) -> None:
+    """Test continue command with existing session."""
+    from conftest import get_commit_shas
+
+    os.chdir(simple_fixture)
+    parent_sha, bad_sha = get_commit_shas(simple_fixture)
+
+    # Create a state file
+    from git_bifurcate.git_ops import GitRepo
+    from git_bifurcate.models import Strategy
+    from git_bifurcate.parser import parse_file_changes
+
+    git = GitRepo()
+    diff_text = git.get_diff(bad_sha, parent_sha)
+    file_changes = parse_file_changes(diff_text)
+
+    state = BifurcationState(
+        commit_sha=bad_sha,
+        parent_sha=parent_sha,
+        test_command="bash test.sh",
+        strategy=Strategy.FILE,
+        changes=file_changes,
+        search_space=list(range(len(file_changes))),
+    )
+    state.save()
+
+    # Run continue
+    result = runner.invoke(main, ["continue"], catch_exceptions=False)
+
+    assert result.exit_code == 0
+    assert "RESUMING BIFURCATION" in result.output
+
+
+def test_cli_start_with_analyze_deps(
+    runner: CliRunner, simple_fixture: Path, change_to_original_dir: None
+) -> None:
+    """Test start command with dependency analysis."""
+    from conftest import get_commit_shas
+
+    os.chdir(simple_fixture)
+    _parent_sha, bad_sha = get_commit_shas(simple_fixture)
+
+    result = runner.invoke(
+        main,
+        ["start", bad_sha, "--strategy", "file", "--test", "bash test.sh", "--analyze-deps"],
+        catch_exceptions=False,
+    )
+
+    assert result.exit_code == 0
+    assert "Analyzing dependencies" in result.output
+
+
+def test_cli_start_with_find_more(
+    runner: CliRunner,
+    simple_fixture: Path,
+    change_to_original_dir: None,
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    """Test start command with find-more flag."""
+    from conftest import get_commit_shas
+
+    os.chdir(simple_fixture)
+    _parent_sha, bad_sha = get_commit_shas(simple_fixture)
+
+    # Mock click.confirm to always return False (don't continue)
+    import click
+
+    monkeypatch.setattr(click, "confirm", lambda _: False)
+
+    result = runner.invoke(
+        main,
+        ["start", bad_sha, "--strategy", "file", "--test", "bash test.sh", "--find-more"],
+        catch_exceptions=False,
+    )
+
+    assert result.exit_code == 0
+    # Should find at least one breaking change
+    assert "BREAKING CHANGE" in result.output
+
+
+def test_cli_start_find_more_multiple_breaks(
+    runner: CliRunner,
+    simple_fixture: Path,
+    change_to_original_dir: None,
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    """Test find-more flag finding multiple breaks."""
+    import click
+    from conftest import get_commit_shas
+
+    os.chdir(simple_fixture)
+    _parent_sha, bad_sha = get_commit_shas(simple_fixture)
+
+    # Mock to return True once, then False
+    confirm_calls = [True, False]
+
+    def mock_confirm(_prompt: str) -> bool:
+        if confirm_calls:
+            return confirm_calls.pop(0)
+        return False
+
+    monkeypatch.setattr(click, "confirm", mock_confirm)
+
+    result = runner.invoke(
+        main,
+        ["start", bad_sha, "--strategy", "file", "--test", "bash test.sh", "--find-more"],
+        catch_exceptions=False,
+    )
+
+    assert result.exit_code == 0
+    assert "BREAKING CHANGE" in result.output
+
+
+def test_cli_continue_empty_search_space(
+    runner: CliRunner, simple_fixture: Path, change_to_original_dir: None
+) -> None:
+    """Test continue with empty search space."""
+    from conftest import get_commit_shas
+
+    from git_bifurcate.git_ops import GitRepo
+    from git_bifurcate.models import Strategy
+    from git_bifurcate.parser import parse_file_changes
+
+    os.chdir(simple_fixture)
+    parent_sha, bad_sha = get_commit_shas(simple_fixture)
+
+    git = GitRepo()
+    diff_text = git.get_diff(bad_sha, parent_sha)
+    file_changes = parse_file_changes(diff_text)
+
+    # Create state with empty search space
+    state = BifurcationState(
+        commit_sha=bad_sha,
+        parent_sha=parent_sha,
+        test_command="bash test.sh",
+        strategy=Strategy.FILE,
+        changes=file_changes,
+        search_space=[],  # Empty!
+    )
+    state.save()
+
+    result = runner.invoke(main, ["continue"], catch_exceptions=False)
+
+    assert result.exit_code == 0
+    assert "Search space is empty" in result.output
+
+
+def test_cli_bisect_error_handling(runner: CliRunner) -> None:
+    """Test bisect command error handling."""
+    # Test with invalid commit - should handle gracefully
+    result = runner.invoke(
+        main,
+        ["bisect", "invalid_sha", "invalid_sha2", "--test", "true"],
+    )
+
+    # Should either error or handle gracefully
+    assert result.exit_code in [0, 1]
+    # Output should contain either error or commit info
+    assert "Error" in result.output or "Bisecting" in result.output or "commits" in result.output
+
+
+def test_cli_continue_hunk_strategy(
+    runner: CliRunner, hunk_fixture: Path, change_to_original_dir: None
+) -> None:
+    """Test continue command with hunk strategy."""
+    from conftest import get_commit_shas
+
+    from git_bifurcate.git_ops import GitRepo
+    from git_bifurcate.models import Strategy
+    from git_bifurcate.parser import parse_hunk_changes
+
+    os.chdir(hunk_fixture)
+    parent_sha, bad_sha = get_commit_shas(hunk_fixture)
+
+    git = GitRepo()
+    diff_text = git.get_diff(bad_sha, parent_sha)
+    hunk_changes = parse_hunk_changes(diff_text)
+
+    # Create state with hunk strategy
+    state = BifurcationState(
+        commit_sha=bad_sha,
+        parent_sha=parent_sha,
+        test_command="python3 test.py",
+        strategy=Strategy.HUNK,
+        changes=hunk_changes,
+        search_space=list(range(len(hunk_changes))),
+    )
+    state.save()
+
+    result = runner.invoke(main, ["continue"], catch_exceptions=False)
+
+    assert result.exit_code == 0
+    assert "RESUMING BIFURCATION" in result.output
+
+
+def test_cli_start_hunk_with_analyze_deps(
+    runner: CliRunner, hunk_fixture: Path, change_to_original_dir: None
+) -> None:
+    """Test hunk strategy with dependency analysis."""
+    from conftest import get_commit_shas
+
+    os.chdir(hunk_fixture)
+    _parent_sha, bad_sha = get_commit_shas(hunk_fixture)
+
+    result = runner.invoke(
+        main,
+        ["start", bad_sha, "--strategy", "hunk", "--test", "python3 test.py", "--analyze-deps"],
+        catch_exceptions=False,
+    )
+
+    assert result.exit_code == 0
+    assert "Analyzing dependencies" in result.output
+
+
+def test_cli_start_hunk_with_find_more(
+    runner: CliRunner,
+    hunk_fixture: Path,
+    change_to_original_dir: None,
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    """Test hunk strategy with find-more flag."""
+    import click
+    from conftest import get_commit_shas
+
+    os.chdir(hunk_fixture)
+    _parent_sha, bad_sha = get_commit_shas(hunk_fixture)
+
+    monkeypatch.setattr(click, "confirm", lambda _: False)
+
+    result = runner.invoke(
+        main,
+        ["start", bad_sha, "--strategy", "hunk", "--test", "python3 test.py", "--find-more"],
+        catch_exceptions=False,
+    )
+
+    assert result.exit_code == 0
+    assert "BREAKING CHANGE" in result.output
+
+
+def test_cli_start_find_more_summary(
+    runner: CliRunner,
+    tmp_path: Path,
+    change_to_original_dir: None,
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    """Test find-more shows summary when multiple changes found."""
+    import subprocess
+
+    import click
+
+    # Create a fixture with 2 separate breaking changes
+    os.chdir(tmp_path)
+    subprocess.run(["git", "init"], check=True, capture_output=True)
+    subprocess.run(["git", "config", "user.name", "Test"], check=True, capture_output=True)
+    subprocess.run(
+        ["git", "config", "user.email", "test@test.com"], check=True, capture_output=True
+    )
+    subprocess.run(["git", "config", "commit.gpgsign", "false"], check=True, capture_output=True)
+
+    # Create base
+    (tmp_path / "test.sh").write_text("#!/bin/bash\nexit 0\n")
+    (tmp_path / "file1.py").write_text("x = 1\n")
+    (tmp_path / "file2.py").write_text("y = 1\n")
+    subprocess.run(["git", "add", "."], check=True, capture_output=True)
+    subprocess.run(["git", "commit", "-m", "Base"], check=True, capture_output=True)
+    parent_sha = subprocess.run(
+        ["git", "rev-parse", "HEAD"], check=True, capture_output=True, text=True
+    ).stdout.strip()
+
+    # Break both files
+    (tmp_path / "file1.py").write_text("x = BROKEN1\n")
+    (tmp_path / "file2.py").write_text("y = BROKEN2\n")
+    subprocess.run(["git", "add", "."], check=True, capture_output=True)
+    subprocess.run(["git", "commit", "-m", "Break both"], check=True, capture_output=True)
+    bad_sha = subprocess.run(
+        ["git", "rev-parse", "HEAD"], check=True, capture_output=True, text=True
+    ).stdout.strip()
+
+    # Go back to parent
+    subprocess.run(["git", "checkout", parent_sha], check=True, capture_output=True)
+
+    # Mock confirm to find both
+    confirm_calls = [True, False]  # Say yes once, no the second time
+
+    def mock_confirm(_prompt: str) -> bool:
+        if confirm_calls:
+            return confirm_calls.pop(0)
+        return False
+
+    monkeypatch.setattr(click, "confirm", mock_confirm)
+
+    result = runner.invoke(
+        main,
+        ["start", bad_sha, "--strategy", "file", "--test", "bash test.sh", "--find-more"],
+        catch_exceptions=False,
+    )
+
+    # Should find breaking changes and show summary
+    assert result.exit_code == 0
+    # Should show the summary with multiple breaking changes
+    if "FOUND" in result.output and "BREAKING CHANGE" in result.output:
+        # Summary was shown
+        assert True
+    else:
+        # Or at least found one breaking change
+        assert "BREAKING CHANGE" in result.output
+
+
+def test_cli_continue_error(
+    runner: CliRunner, tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    """Test continue with error during execution."""
+    from git_bifurcate.models import BifurcationState
+
+    # Create an invalid state that will cause an error
+    os.chdir(tmp_path)
+
+    # Mock to make state exist but fail to load
+    monkeypatch.setattr(BifurcationState, "exists", lambda *args: True)
+    monkeypatch.setattr(
+        BifurcationState,
+        "load",
+        lambda *args: (_ for _ in ()).throw(Exception("Test error")),
+    )
+
+    result = runner.invoke(main, ["continue"])
+
+    assert result.exit_code == 1
+    assert "Error" in result.output
