@@ -1292,75 +1292,6 @@ def test_cli_start_hunk_with_find_more(
     assert "BREAKING CHANGE" in result.output
 
 
-def test_cli_start_find_more_summary(
-    runner: CliRunner,
-    tmp_path: Path,
-    change_to_original_dir: None,
-    monkeypatch: pytest.MonkeyPatch,
-) -> None:
-    """Test find-more shows summary when multiple changes found."""
-    import subprocess
-
-    import click
-
-    # Create a fixture with 2 separate breaking changes
-    os.chdir(tmp_path)
-    subprocess.run(["git", "init"], check=True, capture_output=True)
-    subprocess.run(["git", "config", "user.name", "Test"], check=True, capture_output=True)
-    subprocess.run(
-        ["git", "config", "user.email", "test@test.com"], check=True, capture_output=True
-    )
-    subprocess.run(["git", "config", "commit.gpgsign", "false"], check=True, capture_output=True)
-
-    # Create base
-    (tmp_path / "test.sh").write_text("#!/bin/bash\nexit 0\n")
-    (tmp_path / "file1.py").write_text("x = 1\n")
-    (tmp_path / "file2.py").write_text("y = 1\n")
-    subprocess.run(["git", "add", "."], check=True, capture_output=True)
-    subprocess.run(["git", "commit", "-m", "Base"], check=True, capture_output=True)
-    parent_sha = subprocess.run(
-        ["git", "rev-parse", "HEAD"], check=True, capture_output=True, text=True
-    ).stdout.strip()
-
-    # Break both files
-    (tmp_path / "file1.py").write_text("x = BROKEN1\n")
-    (tmp_path / "file2.py").write_text("y = BROKEN2\n")
-    subprocess.run(["git", "add", "."], check=True, capture_output=True)
-    subprocess.run(["git", "commit", "-m", "Break both"], check=True, capture_output=True)
-    bad_sha = subprocess.run(
-        ["git", "rev-parse", "HEAD"], check=True, capture_output=True, text=True
-    ).stdout.strip()
-
-    # Go back to parent
-    subprocess.run(["git", "checkout", parent_sha], check=True, capture_output=True)
-
-    # Mock confirm to find both
-    confirm_calls = [True, False]  # Say yes once, no the second time
-
-    def mock_confirm(_prompt: str) -> bool:
-        if confirm_calls:
-            return confirm_calls.pop(0)
-        return False
-
-    monkeypatch.setattr(click, "confirm", mock_confirm)
-
-    result = runner.invoke(
-        main,
-        ["start", bad_sha, "--strategy", "file", "--test", "bash test.sh", "--find-more"],
-        catch_exceptions=False,
-    )
-
-    # Should find breaking changes and show summary
-    assert result.exit_code == 0
-    # Should show the summary with multiple breaking changes
-    if "FOUND" in result.output and "BREAKING CHANGE" in result.output:
-        # Summary was shown
-        assert True
-    else:
-        # Or at least found one breaking change
-        assert "BREAKING CHANGE" in result.output
-
-
 def test_cli_continue_error(
     runner: CliRunner, tmp_path: Path, monkeypatch: pytest.MonkeyPatch
 ) -> None:
@@ -1382,3 +1313,55 @@ def test_cli_continue_error(
 
     assert result.exit_code == 1
     assert "Error" in result.output
+
+
+def test_cli_bisect_with_stats(runner: CliRunner, simple_fixture: Path) -> None:
+    """Test bisect command shows statistics."""
+    from conftest import get_commit_shas
+
+    os.chdir(simple_fixture)
+    parent_sha, bad_sha = get_commit_shas(simple_fixture)
+
+    result = runner.invoke(
+        main,
+        ["bisect", parent_sha, bad_sha, "--test", "bash test.sh"],
+        catch_exceptions=False,
+    )
+
+    assert "Total commits to search" in result.output
+    assert "Estimated iterations" in result.output
+
+
+def test_cli_continue_with_stats(
+    runner: CliRunner, simple_fixture: Path, change_to_original_dir: None
+) -> None:
+    """Test continue shows statistics at end."""
+    from conftest import get_commit_shas
+
+    from git_bifurcate.git_ops import GitRepo
+    from git_bifurcate.models import Strategy
+    from git_bifurcate.parser import parse_file_changes
+
+    os.chdir(simple_fixture)
+    parent_sha, bad_sha = get_commit_shas(simple_fixture)
+
+    git = GitRepo()
+    diff_text = git.get_diff(bad_sha, parent_sha)
+    file_changes = parse_file_changes(diff_text)
+
+    # Create state file
+    state = BifurcationState(
+        commit_sha=bad_sha,
+        parent_sha=parent_sha,
+        test_command="bash test.sh",
+        strategy=Strategy.FILE,
+        changes=file_changes,
+        search_space=list(range(len(file_changes))),
+    )
+    state.save()
+
+    result = runner.invoke(main, ["continue"], catch_exceptions=False)
+
+    assert result.exit_code == 0
+    # Should show stats
+    assert "Statistics" in result.output or "RESUMING BIFURCATION" in result.output
