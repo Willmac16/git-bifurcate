@@ -216,6 +216,8 @@ index 1111111..2222222 160000
     assert len(changes) == 1
     assert changes[0].file_path == "vendor/lib"
     assert changes[0].change_type == "submodule"
+    assert changes[0].metadata["old_sha"].startswith("1111")
+    assert changes[0].metadata["new_sha"].startswith("2222")
 
 
 def test_parse_complex_diff() -> None:

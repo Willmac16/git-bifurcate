@@ -33,6 +33,11 @@ def parse_file_changes(diff_text: str) -> list[FileChange]:
             # Save previous file if exists
             if current_path and current_file:
                 detected_type = _detect_change_type(current_type, current_file)
+                metadata: dict[str, str] | None = None
+
+                if detected_type == "submodule":
+                    metadata = _extract_submodule_commits(current_file)
+
                 changes.append(
                     FileChange(
                         id=str(file_counter),
@@ -40,6 +45,7 @@ def parse_file_changes(diff_text: str) -> list[FileChange]:
                         change_type=detected_type,
                         diff_content="\n".join(current_file),
                         status=ChangeStatus.UNKNOWN,
+                        metadata=metadata or {},
                     )
                 )
                 file_counter += 1
@@ -66,6 +72,11 @@ def parse_file_changes(diff_text: str) -> list[FileChange]:
     # Don't forget last file
     if current_path and current_file:
         detected_type = _detect_change_type(current_type, current_file)
+        metadata: dict[str, str] | None = None
+
+        if detected_type == "submodule":
+            metadata = _extract_submodule_commits(current_file)
+
         changes.append(
             FileChange(
                 id=str(file_counter),
@@ -73,6 +84,7 @@ def parse_file_changes(diff_text: str) -> list[FileChange]:
                 change_type=detected_type,
                 diff_content="\n".join(current_file),
                 status=ChangeStatus.UNKNOWN,
+                metadata=metadata or {},
             )
         )
 
@@ -212,3 +224,23 @@ def _detect_change_type(current_type: str, diff_lines: list[str]) -> str:
         return "submodule"
 
     return current_type
+
+
+def _extract_submodule_commits(diff_lines: list[str]) -> dict[str, str]:
+    """Extract old and new submodule commits from a gitlink diff."""
+
+    old_sha: str | None = None
+    new_sha: str | None = None
+
+    for line in diff_lines:
+        if line.startswith("-Subproject commit "):
+            old_sha = line.replace("-Subproject commit ", "").strip()
+        if line.startswith("+Subproject commit "):
+            new_sha = line.replace("+Subproject commit ", "").strip()
+
+    metadata: dict[str, str] = {}
+    if old_sha:
+        metadata["old_sha"] = old_sha
+    if new_sha:
+        metadata["new_sha"] = new_sha
+    return metadata

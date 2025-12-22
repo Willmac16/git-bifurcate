@@ -407,10 +407,10 @@ def test_cli_start_no_breaking_file_found(
 
     monkeypatch.setattr(BifurcationState, "exists", classmethod(lambda cls: False))
     monkeypatch.setattr(
-        BifurcationState, "save", lambda self, filepath=".git/bifurcate-state.json": None
+        BifurcationState, "save", lambda self, filepath=None: None
     )
     monkeypatch.setattr(
-        BifurcationState, "delete", staticmethod(lambda filepath=".git/bifurcate-state.json": None)
+        BifurcationState, "delete", staticmethod(lambda filepath=None: None)
     )
     monkeypatch.setattr("git_bifurcate.cli.GitRepo", FakeGit)
     monkeypatch.setattr("git_bifurcate.cli.parse_file_changes", lambda diff: [file_change])
@@ -595,10 +595,10 @@ def test_cli_start_hunk_no_breaking_change(
 
     monkeypatch.setattr(BifurcationState, "exists", classmethod(lambda cls: False))
     monkeypatch.setattr(
-        BifurcationState, "save", lambda self, filepath=".git/bifurcate-state.json": None
+        BifurcationState, "save", lambda self, filepath=None: None
     )
     monkeypatch.setattr(
-        BifurcationState, "delete", staticmethod(lambda filepath=".git/bifurcate-state.json": None)
+        BifurcationState, "delete", staticmethod(lambda filepath=None: None)
     )
     monkeypatch.setattr("git_bifurcate.cli.GitRepo", FakeGit)
     monkeypatch.setattr("git_bifurcate.cli.parse_hunk_changes", lambda diff: [hunk])
@@ -697,7 +697,7 @@ def test_cli_start_cleanup_success(monkeypatch: pytest.MonkeyPatch, runner: CliR
         BifurcationState, "load", classmethod(lambda cls: SimpleNamespace(commit_sha="abc123"))
     )
     monkeypatch.setattr(
-        BifurcationState, "delete", staticmethod(lambda filepath=".git/bifurcate-state.json": None)
+        BifurcationState, "delete", staticmethod(lambda filepath=None: None)
     )
     monkeypatch.setattr("git_bifurcate.cli.GitRepo", git_factory)
 
