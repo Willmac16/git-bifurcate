@@ -93,11 +93,23 @@ class DependencyAnalyzer:
         Args:
             change: FileChange to analyze.
         """
-        # Try Python AST analysis first
+        # Try language-specific analysis based on file extension
         if change.file_path.endswith(".py"):
             self._extract_python_symbols(change)
+        elif change.file_path.endswith((".c", ".cc", ".cpp", ".cxx", ".h", ".hpp", ".hxx")):
+            self._extract_cpp_symbols(change)
+        elif change.file_path.endswith(".rs"):
+            self._extract_rust_symbols(change)
+        elif change.file_path.endswith(".go"):
+            self._extract_go_symbols(change)
+        elif change.file_path.endswith(".swift"):
+            self._extract_swift_symbols(change)
+        elif change.file_path.endswith(".zig"):
+            self._extract_zig_symbols(change)
+        elif change.file_path.endswith((".v", ".sv", ".vh", ".svh")):
+            self._extract_verilog_symbols(change)
         else:
-            # Fallback to regex-based analysis for other languages
+            # Fallback to generic analysis for other languages
             self._extract_generic_symbols(change)
 
     def _extract_python_symbols(self, change: FileChange) -> None:
@@ -238,6 +250,274 @@ class DependencyAnalyzer:
                 # Remove the '+' prefix
                 added_lines.append(line[1:])
         return added_lines
+
+    def _extract_cpp_symbols(self, change: FileChange) -> None:
+        """Extract symbols from C/C++ code.
+
+        Args:
+            change: FileChange to analyze.
+        """
+        definitions = set()
+        references = set()
+        added_lines = self._extract_added_lines(change.diff_content)
+
+        for line in added_lines:
+            # Include directives
+            if match := re.match(r'^\s*#include\s+[<"]([^>"]+)[>"]', line):
+                header = match.group(1)
+                # Extract base name without path and extension
+                base = header.split("/")[-1].split(".")[0]
+                references.add(base)
+
+            # Function definitions/declarations
+            if match := re.match(r"^\s*(?:static\s+)?(?:inline\s+)?(?:\w+\s+)+(\w+)\s*\(", line):
+                definitions.add(match.group(1))
+
+            # Class/struct definitions
+            if match := re.match(r"^\s*(?:class|struct)\s+(\w+)", line):
+                definitions.add(match.group(1))
+
+            # Namespace declarations
+            if match := re.match(r"^\s*namespace\s+(\w+)", line):
+                definitions.add(match.group(1))
+
+            # Using declarations
+            if match := re.match(r"^\s*using\s+(?:namespace\s+)?(\w+)", line):
+                references.add(match.group(1))
+
+            # Template definitions
+            if match := re.match(r"^\s*template\s*<.*?>\s*(?:class|struct)\s+(\w+)", line):
+                definitions.add(match.group(1))
+
+            # Extract identifiers (potential references)
+            identifiers = re.findall(r"\b[a-zA-Z_]\w*\b", line)
+            references.update(identifiers)
+
+        self.symbol_definitions[change.file_path] = definitions
+        self.symbol_references[change.file_path] = references
+
+    def _extract_rust_symbols(self, change: FileChange) -> None:
+        """Extract symbols from Rust code.
+
+        Args:
+            change: FileChange to analyze.
+        """
+        definitions = set()
+        references = set()
+        added_lines = self._extract_added_lines(change.diff_content)
+
+        for line in added_lines:
+            # Use/extern statements
+            if match := re.match(r"^\s*(?:use|extern\s+crate)\s+(\w+)", line):
+                references.add(match.group(1))
+
+            # Function definitions
+            if match := re.match(r"^\s*(?:pub\s+)?(?:async\s+)?fn\s+(\w+)", line):
+                definitions.add(match.group(1))
+
+            # Struct/enum/trait definitions
+            if match := re.match(r"^\s*(?:pub\s+)?(?:struct|enum|trait|type)\s+(\w+)", line):
+                definitions.add(match.group(1))
+
+            # Impl blocks
+            if match := re.match(r"^\s*impl(?:\s+<.*?>)?\s+(\w+)", line):
+                references.add(match.group(1))
+
+            # Mod declarations
+            if match := re.match(r"^\s*(?:pub\s+)?mod\s+(\w+)", line):
+                definitions.add(match.group(1))
+
+            # Macro definitions
+            if match := re.match(r"^\s*macro_rules!\s+(\w+)", line):
+                definitions.add(match.group(1))
+
+            # Extract identifiers
+            identifiers = re.findall(r"\b[a-zA-Z_]\w*\b", line)
+            references.update(identifiers)
+
+        self.symbol_definitions[change.file_path] = definitions
+        self.symbol_references[change.file_path] = references
+
+    def _extract_go_symbols(self, change: FileChange) -> None:
+        """Extract symbols from Go code.
+
+        Args:
+            change: FileChange to analyze.
+        """
+        definitions = set()
+        references = set()
+        added_lines = self._extract_added_lines(change.diff_content)
+
+        for line in added_lines:
+            # Package declarations
+            if match := re.match(r"^\s*package\s+(\w+)", line):
+                definitions.add(match.group(1))
+
+            # Import statements
+            if match := re.match(r'^\s*(?:import\s+)?(?:"[^"]*?/)?(\w+)"', line):
+                references.add(match.group(1))
+
+            # Function definitions
+            if match := re.match(r"^\s*func\s+(?:\([^)]*\)\s+)?(\w+)", line):
+                definitions.add(match.group(1))
+
+            # Type definitions
+            if match := re.match(r"^\s*type\s+(\w+)", line):
+                definitions.add(match.group(1))
+
+            # Interface definitions
+            if match := re.match(r"^\s*type\s+(\w+)\s+interface", line):
+                definitions.add(match.group(1))
+
+            # Struct definitions
+            if match := re.match(r"^\s*type\s+(\w+)\s+struct", line):
+                definitions.add(match.group(1))
+
+            # Const/var declarations
+            if match := re.match(r"^\s*(?:const|var)\s+(\w+)", line):
+                definitions.add(match.group(1))
+
+            # Extract identifiers
+            identifiers = re.findall(r"\b[a-zA-Z_]\w*\b", line)
+            references.update(identifiers)
+
+        self.symbol_definitions[change.file_path] = definitions
+        self.symbol_references[change.file_path] = references
+
+    def _extract_swift_symbols(self, change: FileChange) -> None:
+        """Extract symbols from Swift code.
+
+        Args:
+            change: FileChange to analyze.
+        """
+        definitions = set()
+        references = set()
+        added_lines = self._extract_added_lines(change.diff_content)
+
+        for line in added_lines:
+            # Import statements
+            if match := re.match(r"^\s*import\s+(\w+)", line):
+                references.add(match.group(1))
+
+            # Class/struct/enum/protocol definitions
+            if match := re.match(
+                r"^\s*(?:public\s+|private\s+|internal\s+)?(?:class|struct|enum|protocol)\s+(\w+)",
+                line,
+            ):
+                definitions.add(match.group(1))
+
+            # Function definitions
+            if match := re.match(r"^\s*(?:public\s+|private\s+)?func\s+(\w+)", line):
+                definitions.add(match.group(1))
+
+            # Property definitions
+            if match := re.match(r"^\s*(?:let|var)\s+(\w+)", line):
+                definitions.add(match.group(1))
+
+            # Extension declarations
+            if match := re.match(r"^\s*extension\s+(\w+)", line):
+                references.add(match.group(1))
+
+            # Typealias
+            if match := re.match(r"^\s*typealias\s+(\w+)", line):
+                definitions.add(match.group(1))
+
+            # Extract identifiers
+            identifiers = re.findall(r"\b[a-zA-Z_]\w*\b", line)
+            references.update(identifiers)
+
+        self.symbol_definitions[change.file_path] = definitions
+        self.symbol_references[change.file_path] = references
+
+    def _extract_zig_symbols(self, change: FileChange) -> None:
+        """Extract symbols from Zig code.
+
+        Args:
+            change: FileChange to analyze.
+        """
+        definitions = set()
+        references = set()
+        added_lines = self._extract_added_lines(change.diff_content)
+
+        for line in added_lines:
+            # Import/use statements
+            if match := re.match(r'^\s*const\s+(\w+)\s*=\s*@import', line):
+                definitions.add(match.group(1))
+
+            # Function definitions
+            if match := re.match(r"^\s*(?:pub\s+)?fn\s+(\w+)", line):
+                definitions.add(match.group(1))
+
+            # Struct/enum/union definitions
+            if match := re.match(r"^\s*(?:pub\s+)?const\s+(\w+)\s*=\s*(?:struct|enum|union)", line):
+                definitions.add(match.group(1))
+
+            # Type definitions
+            if match := re.match(r"^\s*(?:pub\s+)?const\s+(\w+)\s*=\s*type", line):
+                definitions.add(match.group(1))
+
+            # Const/var declarations
+            if match := re.match(r"^\s*(?:pub\s+)?(?:const|var)\s+(\w+)", line):
+                definitions.add(match.group(1))
+
+            # Extract identifiers
+            identifiers = re.findall(r"\b[a-zA-Z_]\w*\b", line)
+            references.update(identifiers)
+
+        self.symbol_definitions[change.file_path] = definitions
+        self.symbol_references[change.file_path] = references
+
+    def _extract_verilog_symbols(self, change: FileChange) -> None:
+        """Extract symbols from Verilog/SystemVerilog code.
+
+        Args:
+            change: FileChange to analyze.
+        """
+        definitions = set()
+        references = set()
+        added_lines = self._extract_added_lines(change.diff_content)
+
+        for line in added_lines:
+            # Include directives
+            if match := re.match(r'^\s*`include\s+"([^"]+)"', line):
+                header = match.group(1)
+                base = header.split("/")[-1].split(".")[0]
+                references.add(base)
+
+            # Module definitions
+            if match := re.match(r"^\s*module\s+(\w+)", line):
+                definitions.add(match.group(1))
+
+            # Package definitions
+            if match := re.match(r"^\s*package\s+(\w+)", line):
+                definitions.add(match.group(1))
+
+            # Class definitions (SystemVerilog)
+            if match := re.match(r"^\s*class\s+(\w+)", line):
+                definitions.add(match.group(1))
+
+            # Interface definitions
+            if match := re.match(r"^\s*interface\s+(\w+)", line):
+                definitions.add(match.group(1))
+
+            # Function/task definitions
+            if match := re.match(r"^\s*(?:function|task)\s+(?:\w+\s+)?(\w+)", line):
+                definitions.add(match.group(1))
+
+            # Import statements
+            if match := re.match(r"^\s*import\s+(\w+)", line):
+                references.add(match.group(1))
+
+            # Parameter definitions
+            if match := re.match(r"^\s*parameter\s+(?:\w+\s+)?(\w+)", line):
+                definitions.add(match.group(1))
+
+            # Extract identifiers
+            identifiers = re.findall(r"\b[a-zA-Z_]\w*\b", line)
+            references.update(identifiers)
+
+        self.symbol_definitions[change.file_path] = definitions
+        self.symbol_references[change.file_path] = references
 
     def detect_import_dependencies(
         self, changes: list[FileChange]

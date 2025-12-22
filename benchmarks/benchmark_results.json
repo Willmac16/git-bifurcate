@@ -1,0 +1,160 @@
+[
+  {
+    "name": "Python AST Analysis",
+    "duration_ms": 36.71848799996269,
+    "iterations": 1000,
+    "ops_per_sec": 27234.236878191066,
+    "metadata": {
+      "language": "python"
+    },
+    "timestamp": 1766368015.4217474
+  },
+  {
+    "name": "C++ Regex Analysis",
+    "duration_ms": 21.793834999982664,
+    "iterations": 1000,
+    "ops_per_sec": 45884.53569556691,
+    "metadata": {
+      "language": "cpp"
+    },
+    "timestamp": 1766368015.4217494
+  },
+  {
+    "name": "Rust Regex Analysis",
+    "duration_ms": 18.356235999988257,
+    "iterations": 1000,
+    "ops_per_sec": 54477.399397166155,
+    "metadata": {
+      "language": "rust"
+    },
+    "timestamp": 1766368015.4217496
+  },
+  {
+    "name": "Go Regex Analysis",
+    "duration_ms": 24.363086999983352,
+    "iterations": 1000,
+    "ops_per_sec": 41045.70163874074,
+    "metadata": {
+      "language": "go"
+    },
+    "timestamp": 1766368015.42175
+  },
+  {
+    "name": "Mixed Language Analysis (20 files)",
+    "duration_ms": 28.098886000009315,
+    "iterations": 100,
+    "ops_per_sec": 3558.8599491085465,
+    "metadata": {
+      "file_count": 20
+    },
+    "timestamp": 1766368015.4217505
+  },
+  {
+    "name": "Large File Set Analysis (100 files)",
+    "duration_ms": 149.7785550000117,
+    "iterations": 50,
+    "ops_per_sec": 333.8261608946361,
+    "metadata": {
+      "file_count": 100
+    },
+    "timestamp": 1766368015.421751
+  },
+  {
+    "name": "Binary Search (8 items)",
+    "duration_ms": 3.0587250000166932,
+    "iterations": 500,
+    "ops_per_sec": 163466.80397788988,
+    "metadata": {
+      "search_space_size": 8
+    },
+    "timestamp": 1766368015.4217517
+  },
+  {
+    "name": "Binary Search (32 items)",
+    "duration_ms": 2.3164109999811444,
+    "iterations": 200,
+    "ops_per_sec": 86340.4637612358,
+    "metadata": {
+      "search_space_size": 32
+    },
+    "timestamp": 1766368015.4217522
+  },
+  {
+    "name": "Binary Search (128 items)",
+    "duration_ms": 1.3274620000061077,
+    "iterations": 50,
+    "ops_per_sec": 37665.86162147764,
+    "metadata": {
+      "search_space_size": 128
+    },
+    "timestamp": 1766368015.421753
+  },
+  {
+    "name": "Binary Search with Dependencies (16 items)",
+    "duration_ms": 2.518023000050107,
+    "iterations": 300,
+    "ops_per_sec": 119141.08806553006,
+    "metadata": {
+      "search_space_size": 16,
+      "has_dependencies": true
+    },
+    "timestamp": 1766368015.4217532
+  },
+  {
+    "name": "Dependency Graph Construction (50 nodes)",
+    "duration_ms": 8.707597000011447,
+    "iterations": 500,
+    "ops_per_sec": 57421.12318695304,
+    "metadata": {
+      "node_count": 50
+    },
+    "timestamp": 1766368015.4217534
+  },
+  {
+    "name": "Transitive Dependency Resolution",
+    "duration_ms": 13.295991999996204,
+    "iterations": 1000,
+    "ops_per_sec": 75210.63490413393,
+    "metadata": {
+      "chain_length": 50
+    },
+    "timestamp": 1766368015.421754
+  },
+  {
+    "name": "Topological Sort (100 nodes)",
+    "duration_ms": 27.403225000000475,
+    "iterations": 500,
+    "ops_per_sec": 18246.027611713267,
+    "metadata": {
+      "node_count": 100
+    },
+    "timestamp": 1766368015.4217541
+  },
+  {
+    "name": "Find Independent Sets (100 nodes, 5 chains)",
+    "duration_ms": 25.05590900000243,
+    "iterations": 300,
+    "ops_per_sec": 11973.223561754272,
+    "metadata": {
+      "node_count": 100,
+      "chain_count": 5
+    },
+    "timestamp": 1766368015.4217544
+  },
+  {
+    "name": "Cache Hit Performance",
+    "duration_ms": 6.406659999981912,
+    "iterations": 10000,
+    "ops_per_sec": 1560875.713714827,
+    "metadata": {},
+    "timestamp": 1766368015.4217548
+  },
+  {
+    "name": "Cache Miss Performance",
+    "duration_ms": 1.4960610000116503,
+    "iterations": 1000,
+    "ops_per_sec": 668421.9426829605,
+    "metadata": {},
+    "timestamp": 1766368015.421755
+  }
+]
