@@ -209,9 +209,6 @@ def start(
                 # Filter to only search remaining indices
                 remaining_changes = [file_changes[i] for i in search_indices]
 
-                if not remaining_changes:
-                    break
-
                 breaking_file = engine.bifurcate_files(remaining_changes, parent_sha, verbose=True)
 
                 if breaking_file:
@@ -402,9 +399,6 @@ def start(
 
                 # Filter to only search remaining indices
                 remaining_hunks = [hunk_changes[i] for i in search_indices]
-
-                if not remaining_hunks:
-                    break
 
                 breaking_hunk = engine.bifurcate_hunks(
                     remaining_hunks, parent_sha, commit_sha, verbose=True

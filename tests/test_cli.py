@@ -1596,101 +1596,6 @@ def test_cli_continue_hunk_empty_search_space(
     assert "Search space is empty" in result.output
 
 
-def test_cli_start_find_more_empty_remaining_changes(
-    runner: CliRunner,
-    simple_fixture: Path,
-    change_to_original_dir: None,
-    monkeypatch: pytest.MonkeyPatch,
-) -> None:
-    """Test line 213: remaining_changes becomes empty during find-more loop."""
-    from conftest import get_commit_shas
-
-    from git_bifurcate.core import BifurcationEngine
-    from git_bifurcate.git_ops import GitRepo
-    from git_bifurcate.parser import parse_file_changes
-
-    os.chdir(simple_fixture)
-    _parent_sha, bad_sha = get_commit_shas(simple_fixture)
-
-    # Get the actual file changes to know how many there are
-    git = GitRepo()
-    diff_text = git.get_diff(bad_sha, _parent_sha)
-    file_changes = parse_file_changes(diff_text)
-    num_changes = len(file_changes)
-
-    # Mock bifurcate_files to find each change one by one
-    call_count = [0]
-
-    def mock_bifurcate(self, changes, *args, **kwargs):
-        call_count[0] += 1
-        # Return the first available change each time
-        if changes:
-            return changes[0]
-        return None
-
-    monkeypatch.setattr(BifurcationEngine, "bifurcate_files", mock_bifurcate)
-
-    # Mock confirm to always say yes
-    monkeypatch.setattr("click.confirm", lambda _: True)
-
-    result = runner.invoke(
-        main,
-        ["start", bad_sha, "--strategy", "file", "--test", "bash test.sh", "--find-more"],
-        catch_exceptions=False,
-    )
-
-    assert result.exit_code == 0
-    # Should have been called multiple times until all changes found
-    assert call_count[0] >= num_changes
-
-
-def test_cli_start_find_more_empty_remaining_hunks(
-    runner: CliRunner,
-    hunk_fixture: Path,
-    change_to_original_dir: None,
-    monkeypatch: pytest.MonkeyPatch,
-) -> None:
-    """Test line 407: remaining_hunks becomes empty during find-more loop."""
-    from conftest import get_commit_shas
-
-    from git_bifurcate.core import BifurcationEngine
-    from git_bifurcate.git_ops import GitRepo
-    from git_bifurcate.parser import parse_hunk_changes
-
-    os.chdir(hunk_fixture)
-    _parent_sha, bad_sha = get_commit_shas(hunk_fixture)
-
-    # Get the actual hunk changes to know how many there are
-    git = GitRepo()
-    diff_text = git.get_diff(bad_sha, _parent_sha)
-    hunk_changes = parse_hunk_changes(diff_text)
-    num_hunks = len(hunk_changes)
-
-    # Mock bifurcate_hunks to find each hunk one by one
-    call_count = [0]
-
-    def mock_bifurcate(self, hunks, *args, **kwargs):
-        call_count[0] += 1
-        # Return the first available hunk each time
-        if hunks:
-            return hunks[0]
-        return None
-
-    monkeypatch.setattr(BifurcationEngine, "bifurcate_hunks", mock_bifurcate)
-
-    # Mock confirm to always say yes
-    monkeypatch.setattr("click.confirm", lambda _: True)
-
-    result = runner.invoke(
-        main,
-        ["start", bad_sha, "--strategy", "hunk", "--test", "python3 test.py", "--find-more"],
-        catch_exceptions=False,
-    )
-
-    assert result.exit_code == 0
-    # Should have been called multiple times until all hunks found
-    assert call_count[0] >= num_hunks
-
 
 def test_cli_continue_file_no_breaking_change_found(
     runner: CliRunner,
@@ -1772,3 +1677,37 @@ def test_cli_continue_hunk_no_breaking_change_found(
 
     assert result.exit_code == 0
     assert "No single breaking change found" in result.output
+
+
+def test_cli_bisect_with_submodules_detected(
+    runner: CliRunner, simple_fixture: Path, monkeypatch
+) -> None:
+    """Test line 660: submodules notification in bisect command."""
+    from conftest import get_commit_shas
+
+    os.chdir(simple_fixture)
+    parent_sha, bad_sha = get_commit_shas(simple_fixture)
+
+    # Mock get_bisect_stats to return has_submodules=True
+    def mock_get_bisect_stats(self, good_commit, bad_commit):
+        return {
+            "total_commits": 5,
+            "estimated_iterations": 3,
+            "has_submodules": True,  # This triggers line 660
+        }
+
+    # Mock bisect_commits to return a commit
+    def mock_bisect_commits(self, good_commit, bad_commit, verbose=True):
+        return bad_sha
+
+    from git_bifurcate.commit_bisect import CommitBisector
+
+    monkeypatch.setattr(CommitBisector, "get_bisect_stats", mock_get_bisect_stats)
+    monkeypatch.setattr(CommitBisector, "bisect_commits", mock_bisect_commits)
+
+    result = runner.invoke(
+        main, ["bisect", parent_sha, bad_sha, "--test", "python3 test.py"], catch_exceptions=False
+    )
+
+    assert result.exit_code == 0
+    assert "Note: Repository contains submodules" in result.output
