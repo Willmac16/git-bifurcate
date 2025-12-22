@@ -3,6 +3,8 @@
 from __future__ import annotations
 
 import json
+import sys
+import types
 from pathlib import Path
 
 import pytest
@@ -120,6 +122,22 @@ def test_file_change_roundtrip() -> None:
     assert restored.diff_content == original.diff_content
     assert restored.status == original.status
     assert restored.metadata == original.metadata
+
+
+def test_bifurcation_state_default_path_fallback(monkeypatch: pytest.MonkeyPatch) -> None:
+    """default_path falls back gracefully when git metadata is unavailable."""
+
+    class DummyRepo:
+        git_dir = "ignored"
+
+    def bad_repo(*args, **kwargs):
+        raise RuntimeError("no git here")
+
+    fake_git = types.SimpleNamespace(Repo=bad_repo)
+    monkeypatch.setitem(sys.modules, "git", fake_git)  # type: ignore[arg-type]
+
+    path = BifurcationState.default_path()
+    assert path == Path(".git") / "bifurcate-state.json"
 
 
 def test_hunk_change_creation() -> None:

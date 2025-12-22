@@ -500,9 +500,7 @@ def _analyze_submodule_drift(
         click.echo(f"  Path: {breaking_inner.file_path}")
         click.echo(f"  Type: {breaking_inner.change_type}")
     else:
-        click.echo(
-            "  No single submodule change isolated; interaction analysis may be required."
-        )
+        click.echo("  No single submodule change isolated; interaction analysis may be required.")
 
     # Always return the working tree to the commit under investigation to avoid surprises
     git.reset_hard(commit_sha)
