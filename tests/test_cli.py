@@ -1596,7 +1596,6 @@ def test_cli_continue_hunk_empty_search_space(
     assert "Search space is empty" in result.output
 
 
-
 def test_cli_continue_file_no_breaking_change_found(
     runner: CliRunner,
     simple_fixture: Path,
