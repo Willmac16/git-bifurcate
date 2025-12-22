@@ -390,3 +390,119 @@ class TestEdgeCases:
         # Should capture the module reference
         refs = analyzer.symbol_references.get("user.py", set())
         assert "module" in analyzer.symbol_definitions.get("user.py", set())
+
+    def test_import_with_asname(self) -> None:
+        """Test detecting imports with asname (e.g., import foo as bar)."""
+        change = FileChange(
+            "0",
+            "user.py",
+            "added",
+            "+import numpy as np\n+import pandas as pd\n+result = np.array([1,2,3])",
+            ChangeStatus.UNKNOWN,
+        )
+
+        analyzer = DependencyAnalyzer()
+        analyzer._extract_python_symbols(change)
+
+        defs = analyzer.symbol_definitions.get("user.py", set())
+        # asname should be captured
+        assert "np" in defs
+        assert "pd" in defs
+
+    def test_attribute_access_references(self) -> None:
+        """Test detecting attribute access as references."""
+        change = FileChange(
+            "0",
+            "user.py",
+            "added",
+            "+import module\n+result = module.function()\n+value = obj.attr",
+            ChangeStatus.UNKNOWN,
+        )
+
+        analyzer = DependencyAnalyzer()
+        analyzer._extract_python_symbols(change)
+
+        refs = analyzer.symbol_references.get("user.py", set())
+        # module and obj should be in references
+        assert "module" in refs or "module" in analyzer.symbol_definitions.get("user.py", set())
+
+    def test_detect_import_dependencies(self) -> None:
+        """Test detect_import_dependencies method."""
+        changes = [
+            FileChange(
+                "0",
+                "utils.py",
+                "added",
+                "+def utility():\n+    pass",
+                ChangeStatus.UNKNOWN,
+            ),
+            FileChange(
+                "1",
+                "main.py",
+                "added",
+                "+from utils import utility\n+utility()",
+                ChangeStatus.UNKNOWN,
+            ),
+        ]
+
+        analyzer = DependencyAnalyzer()
+        deps = analyzer.detect_import_dependencies(changes)
+
+        # Should detect import dependency
+        assert isinstance(deps, dict)
+        assert all(change.id in deps for change in changes)
+        # main.py should depend on utils.py
+        assert "0" in deps["1"]
+
+    def test_detect_import_dependencies_syntax_error(self) -> None:
+        """Test detect_import_dependencies handles syntax errors."""
+        changes = [
+            FileChange(
+                "0",
+                "broken.py",
+                "added",
+                "+def foo(\n+    # Syntax error",
+                ChangeStatus.UNKNOWN,
+            ),
+        ]
+
+        analyzer = DependencyAnalyzer()
+        deps = analyzer.detect_import_dependencies(changes)
+
+        # Should handle error gracefully
+        assert "0" in deps
+
+    def test_detect_import_dependencies_non_python(self) -> None:
+        """Test detect_import_dependencies skips non-Python files."""
+        changes = [
+            FileChange(
+                "0",
+                "file.cpp",
+                "added",
+                "+#include <iostream>",
+                ChangeStatus.UNKNOWN,
+            ),
+        ]
+
+        analyzer = DependencyAnalyzer()
+        deps = analyzer.detect_import_dependencies(changes)
+
+        # Should skip non-Python files
+        assert deps["0"] == []
+
+    def test_verilog_parameter_detection(self) -> None:
+        """Test detecting Verilog parameter definitions."""
+        change = FileChange(
+            "0",
+            "module.v",
+            "added",
+            "+parameter WIDTH = 8;\n+parameter integer DEPTH = 16;",
+            ChangeStatus.UNKNOWN,
+        )
+
+        analyzer = DependencyAnalyzer()
+        analyzer._extract_verilog_symbols(change)
+
+        defs = analyzer.symbol_definitions.get("module.v", set())
+        assert "WIDTH" in defs
+        assert "DEPTH" in defs

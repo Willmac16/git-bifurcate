@@ -760,6 +760,75 @@ def test_find_interaction_failure_respects_limit(
     assert engine.interaction_failure is None
 
 
+def test_find_interaction_failure_with_dependencies(
+    mock_git: MagicMock, mock_test_runner: MagicMock
+) -> None:
+    """_find_interaction_failure tries dependent pairs first."""
+    changes = [
+        FileChange("0", "f1", "modified", "d1", ChangeStatus.UNKNOWN, dependencies=[]),
+        FileChange("1", "f2", "modified", "d2", ChangeStatus.UNKNOWN, dependencies=["0"]),
+        FileChange("2", "f3", "modified", "d3", ChangeStatus.UNKNOWN, dependencies=[]),
+    ]
+    engine = BifurcationEngine(mock_git, mock_test_runner)
+
+    def test_func(applied: list[FileChange], *_: object, **__: object) -> CommandResult:
+        ids = {c.id for c in applied}
+        # Only the dependent pair (0, 1) fails
+        return CommandResult.FAIL if ids == {"0", "1"} else CommandResult.PASS
+
+    mock_git.apply_changes.side_effect = lambda applied, *_args, **_kwargs: True
+    mock_test_runner.run.side_effect = lambda: test_func(mock_git.apply_changes.call_args[0][0])
+
+    combo = engine._find_interaction_failure(changes, "base", None, max_combinations=10)
+    # Should find the dependent pair first
+    assert combo == [0, 1]
+    assert engine.interaction_failure == [0, 1]
+
+
+def test_find_interaction_failure_dependent_pairs_max_limit(
+    mock_git: MagicMock, mock_test_runner: MagicMock
+) -> None:
+    """_find_interaction_failure respects max_combinations during dependent pairs."""
+    changes = [
+        FileChange("0", "f1", "modified", "d1", ChangeStatus.UNKNOWN, dependencies=[]),
+        FileChange("1", "f2", "modified", "d2", ChangeStatus.UNKNOWN, dependencies=["0"]),
+        FileChange("2", "f3", "modified", "d3", ChangeStatus.UNKNOWN, dependencies=["0"]),
+    ]
+    engine = BifurcationEngine(mock_git, mock_test_runner)
+
+    mock_git.apply_changes.return_value = True
+    mock_test_runner.run.return_value = CommandResult.PASS
+
+    # Max 1 combination, should return None even with dependent pairs to check
+    combo = engine._find_interaction_failure(changes, "base", None, max_combinations=1)
+    assert combo is None
+
+
+def test_find_interaction_failure_forward_dependency(
+    mock_git: MagicMock, mock_test_runner: MagicMock
+) -> None:
+    """_find_interaction_failure handles forward dependencies (dep comes later)."""
+    changes = [
+        FileChange("0", "f1", "modified", "d1", ChangeStatus.UNKNOWN, dependencies=["1"]),
+        FileChange("1", "f2", "modified", "d2", ChangeStatus.UNKNOWN, dependencies=[]),
+        FileChange("2", "f3", "modified", "d3", ChangeStatus.UNKNOWN, dependencies=[]),
+    ]
+    engine = BifurcationEngine(mock_git, mock_test_runner)
+
+    def test_func(applied: list[FileChange], *_: object, **__: object) -> CommandResult:
+        ids = {c.id for c in applied}
+        # The forward dependency pair (0, 1) fails
+        return CommandResult.FAIL if ids == {"0", "1"} else CommandResult.PASS
+
+    mock_git.apply_changes.side_effect = lambda applied, *_args, **_kwargs: True
+    mock_test_runner.run.side_effect = lambda: test_func(mock_git.apply_changes.call_args[0][0])
+
+    combo = engine._find_interaction_failure(changes, "base", None, max_combinations=10)
+    # Should find the forward dependency pair
+    assert set(combo) == {0, 1}
+    assert engine.interaction_failure == combo
+
+
 def test_report_interaction_outputs(monkeypatch: pytest.MonkeyPatch) -> None:
     """_report_interaction prints identified failing combos and handles no results."""
     engine = BifurcationEngine(MagicMock(spec=GitRepo), MagicMock(spec=CommandRunner))
