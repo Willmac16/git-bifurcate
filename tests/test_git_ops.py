@@ -6,8 +6,8 @@ import subprocess
 from pathlib import Path
 from types import SimpleNamespace
 
-import pytest
 import git
+import pytest
 
 from git_bifurcate.git_ops import GitOperationError, GitRepo
 from git_bifurcate.models import ChangeStatus, FileChange
@@ -648,8 +648,10 @@ def test_get_parent_commit_merge_commit(git_repo: Path) -> None:
     """Ensure merge commits raise an error when asking for a single parent."""
     base = create_commit(git_repo, "base.txt", "base", "base")
 
-    subprocess.run(["git", "checkout", "-b", "feature"], cwd=git_repo, check=True, capture_output=True)
-    feature = create_commit(git_repo, "feature.txt", "feature", "feature change")
+    subprocess.run(
+        ["git", "checkout", "-b", "feature"], cwd=git_repo, check=True, capture_output=True
+    )
+    create_commit(git_repo, "feature.txt", "feature", "feature change")
 
     subprocess.run(["git", "checkout", "master"], cwd=git_repo, check=True, capture_output=True)
     _master_change = create_commit(git_repo, "master.txt", "master", "master change")
@@ -683,9 +685,7 @@ def test_get_diff_failure(monkeypatch: pytest.MonkeyPatch, git_repo: Path) -> No
         repo.get_diff("child", "parent")
 
 
-def test_checkout_best_effort_submodules(
-    monkeypatch: pytest.MonkeyPatch, git_repo: Path
-) -> None:
+def test_checkout_best_effort_submodules(monkeypatch: pytest.MonkeyPatch, git_repo: Path) -> None:
     """Checkout should ignore submodule update failures but still succeed."""
     first_sha = create_commit(git_repo, "file.txt", "one", "first")
     second_sha = create_commit(git_repo, "file.txt", "two", "second")
@@ -844,7 +844,9 @@ def test_apply_changes_temp_branch_failure(monkeypatch: pytest.MonkeyPatch, git_
     assert not repo.apply_changes([], base, use_temp_branch=True)
 
 
-def test_apply_changes_reset_failure_without_temp(monkeypatch: pytest.MonkeyPatch, git_repo: Path) -> None:
+def test_apply_changes_reset_failure_without_temp(
+    monkeypatch: pytest.MonkeyPatch, git_repo: Path
+) -> None:
     """Reset failures when not using temp branches return False."""
     base = create_commit(git_repo, "file.txt", "data", "message")
     repo = GitRepo(git_repo)
@@ -872,7 +874,9 @@ def test_apply_changes_submodule_cleanup_failure(
     )
 
     monkeypatch.setattr(repo, "_apply_submodule_changes", lambda changes: False)
-    monkeypatch.setattr(type(repo.repo.git), "checkout", lambda *args, **kwargs: None, raising=False)
+    monkeypatch.setattr(
+        type(repo.repo.git), "checkout", lambda *args, **kwargs: None, raising=False
+    )
     monkeypatch.setattr(repo, "create_temp_branch", lambda name, base_commit: None)
     deleted = {"called": False}
     monkeypatch.setattr(repo, "delete_branch", lambda name: deleted.__setitem__("called", True))
@@ -997,9 +1001,7 @@ def test_apply_submodule_changes_checkout_and_add_failures(
     assert not repo._apply_submodule_changes([change])
 
 
-def test_apply_hunk_changes_reset_failure(
-    monkeypatch: pytest.MonkeyPatch, git_repo: Path
-) -> None:
+def test_apply_hunk_changes_reset_failure(monkeypatch: pytest.MonkeyPatch, git_repo: Path) -> None:
     """Reset failures with empty hunks return False."""
     repo = GitRepo(git_repo)
     create_commit(git_repo, "file.txt", "content\n", "msg")
@@ -1082,7 +1084,13 @@ index 1..2 100644
     monkeypatch.setattr(repo, "create_temp_branch", lambda name, commit: None)
     monkeypatch.setattr(repo, "get_diff", lambda bad, base_commit: diff_text)
     monkeypatch.setattr(repo, "apply_patch", lambda patch: True)
-    monkeypatch.setattr(repo, "repo", SimpleNamespace(head=FakeHead(base), git=SimpleNamespace(checkout=lambda *args, **kwargs: None)))
+    monkeypatch.setattr(
+        repo,
+        "repo",
+        SimpleNamespace(
+            head=FakeHead(base), git=SimpleNamespace(checkout=lambda *args, **kwargs: None)
+        ),
+    )
 
     assert repo.apply_hunk_changes([sample_hunk], base, base, use_temp_branch=True)
 
@@ -1108,7 +1116,11 @@ def test_apply_hunk_changes_create_branch_failure(
         status=ChangeStatus.UNKNOWN,
     )
 
-    monkeypatch.setattr(repo, "create_temp_branch", lambda name, commit: (_ for _ in ()).throw(GitOperationError("no branch")))
+    monkeypatch.setattr(
+        repo,
+        "create_temp_branch",
+        lambda name, commit: (_ for _ in ()).throw(GitOperationError("no branch")),
+    )
     assert not repo.apply_hunk_changes([sample_hunk], base, base, use_temp_branch=True)
 
 
