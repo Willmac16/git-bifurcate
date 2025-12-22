@@ -28,13 +28,13 @@ jobs:
       run: |
         uv sync --all-extras --dev
 
-    - name: Run ruff linter
-      run: |
-        uv run ruff check src tests
-
     - name: Run ruff formatter check
       run: |
         uv run ruff format --check src tests
+
+    - name: Run ruff linter
+      run: |
+        uv run ruff check src tests
 
     - name: Run ty type checker
       run: |
