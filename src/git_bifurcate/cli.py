@@ -180,6 +180,11 @@ def start(commit: str | None, test: str, strategy: str, parent: str | None) -> N
                 click.echo("-" * 60)
                 click.echo()
 
+                if breaking_file.change_type == "submodule":
+                    _analyze_submodule_drift(
+                        git, test_runner, parent_sha, file_changes, breaking_file, commit_sha
+                    )
+
                 # Show stats
                 stats = engine.get_stats()
                 click.echo("Statistics:")
@@ -206,6 +211,10 @@ def start(commit: str | None, test: str, strategy: str, parent: str | None) -> N
                 click.echo("  2. Dependency issues between changes")
                 click.echo("  3. The test is nondeterministic")
                 click.echo()
+
+                _analyze_submodule_interactions(
+                    git, test_runner, parent_sha, file_changes, commit_sha
+                )
 
                 # Show stats
                 stats = engine.get_stats()
@@ -463,6 +472,80 @@ def reset(force: bool) -> None:
         click.echo("  2. rm .git/bifurcate-state.json")
         click.echo("  3. git branch -D bifurcate-temp (if exists)")
         sys.exit(1)
+
+
+def _analyze_submodule_drift(
+    git: GitRepo,
+    test_runner: CommandRunner,
+    parent_sha: str,
+    file_changes: list[FileChange],
+    breaking_submodule: FileChange,
+    commit_sha: str,
+) -> None:
+    """Dive into a breaking submodule change to pinpoint the inner culprit."""
+
+    click.echo("Submodule update detected; drilling down to locate offending change...")
+    inner_changes = git.get_submodule_changes(breaking_submodule)
+
+    if not inner_changes:
+        click.echo("  Unable to inspect submodule contents (no diff available).")
+        return
+
+    click.echo(f"  Found {len(inner_changes)} changes inside {breaking_submodule.file_path}")
+    inner_engine = BifurcationEngine(git, test_runner)
+    breaking_inner = inner_engine.bifurcate_files(inner_changes, parent_sha, verbose=True)
+
+    if breaking_inner:
+        click.echo("\nSubmodule-level breaking change identified:")
+        click.echo(f"  Path: {breaking_inner.file_path}")
+        click.echo(f"  Type: {breaking_inner.change_type}")
+    else:
+        click.echo(
+            "  No single submodule change isolated; interaction analysis may be required."
+        )
+
+    # Always return the working tree to the commit under investigation to avoid surprises
+    git.reset_hard(commit_sha)
+
+
+def _analyze_submodule_interactions(
+    git: GitRepo,
+    test_runner: CommandRunner,
+    parent_sha: str,
+    file_changes: list[FileChange],
+    commit_sha: str,
+) -> None:
+    """Expand submodule updates into granular changes to search for interactions."""
+
+    submodule_changes = [c for c in file_changes if c.change_type == "submodule"]
+    if not submodule_changes:
+        return
+
+    nested_changes: list[FileChange] = []
+    for sub_change in submodule_changes:
+        nested_changes.extend(git.get_submodule_changes(sub_change))
+
+    if not nested_changes:
+        click.echo("No deeper submodule diffs available; skipping nested analysis.")
+        return
+
+    click.echo("Re-running search across supermodule changes and submodule internals...")
+    combined_changes = [c for c in file_changes if c.change_type != "submodule"] + nested_changes
+    inner_engine = BifurcationEngine(git, test_runner)
+    breaking = inner_engine.bifurcate_files(combined_changes, parent_sha, verbose=True)
+
+    if breaking:
+        click.echo("\nInteraction candidate detected:")
+        click.echo(f"  Path: {breaking.file_path}")
+        click.echo(f"  Type: {breaking.change_type}")
+    elif inner_engine.interaction_failure:
+        click.echo(
+            "  Possible interaction identified. Retry with the reported combination to confirm."
+        )
+    else:
+        click.echo("  No interaction found within search budget.")
+
+    git.reset_hard(commit_sha)
 
 
 if __name__ == "__main__":

@@ -55,6 +55,7 @@ def test_file_change_creation() -> None:
     assert change.change_type == "modified"
     assert change.diff_content == "diff content"
     assert change.status == ChangeStatus.UNKNOWN
+    assert change.metadata == {}
 
 
 def test_file_change_to_dict() -> None:
@@ -65,6 +66,7 @@ def test_file_change_to_dict() -> None:
         change_type="added",
         diff_content="some diff",
         status=ChangeStatus.GOOD,
+        metadata={"old": "one"},
     )
 
     data = change.to_dict()
@@ -74,6 +76,7 @@ def test_file_change_to_dict() -> None:
     assert data["change_type"] == "added"
     assert data["diff_content"] == "some diff"
     assert data["status"] == "good"
+    assert data["metadata"] == {"old": "one"}
 
 
 def test_file_change_from_dict() -> None:
@@ -84,6 +87,7 @@ def test_file_change_from_dict() -> None:
         "change_type": "deleted",
         "diff_content": "diff data",
         "status": "bad",
+        "metadata": {"key": "value"},
     }
 
     change = FileChange.from_dict(data)
@@ -93,6 +97,7 @@ def test_file_change_from_dict() -> None:
     assert change.change_type == "deleted"
     assert change.diff_content == "diff data"
     assert change.status == ChangeStatus.BAD
+    assert change.metadata == {"key": "value"}
 
 
 def test_file_change_roundtrip() -> None:
@@ -103,6 +108,7 @@ def test_file_change_roundtrip() -> None:
         change_type="modified",
         diff_content="test diff",
         status=ChangeStatus.SKIP,
+        metadata={"nested": "info"},
     )
 
     data = original.to_dict()
@@ -113,6 +119,7 @@ def test_file_change_roundtrip() -> None:
     assert restored.change_type == original.change_type
     assert restored.diff_content == original.diff_content
     assert restored.status == original.status
+    assert restored.metadata == original.metadata
 
 
 def test_hunk_change_creation() -> None:

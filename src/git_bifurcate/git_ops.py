@@ -32,6 +32,7 @@ class GitRepo:
             self.repo = git.Repo(repo_path, search_parent_directories=True)
             # Resolve the repository path to eliminate any symlink prefixes (e.g., /private on macOS)
             self.repo_path = Path(self.repo.working_dir).resolve()
+            self.git_dir = Path(self.repo.git_dir).resolve()
         except git.InvalidGitRepositoryError as e:
             msg = f"Not a git repository: {repo_path}"
             raise GitOperationError(msg) from e
@@ -260,6 +261,8 @@ class GitRepo:
         # Separate submodule changes so we can update gitlinks explicitly
         submodule_changes = [c for c in changes if c.change_type == "submodule"]
         normal_changes = [c for c in changes if c.change_type != "submodule"]
+        nested_submodule_changes = [c for c in normal_changes if c.metadata.get("submodule_path")]
+        root_changes = [c for c in normal_changes if not c.metadata.get("submodule_path")]
 
         # Apply submodule updates first (they don't participate in textual patching)
         if submodule_changes:
@@ -274,12 +277,46 @@ class GitRepo:
                 return False
 
         # Combine patches for non-submodule changes
-        combined_patch = "\n".join(change.diff_content for change in normal_changes)
+        combined_patch = "\n".join(change.diff_content for change in root_changes)
 
         # Try to apply
         success = True
         if combined_patch.strip():
             success = self.apply_patch(combined_patch)
+
+        # Apply nested submodule patches grouped per submodule
+        if success and nested_submodule_changes:
+            from collections import defaultdict
+
+            grouped: dict[str, list[FileChange]] = defaultdict(list)
+            for change in nested_submodule_changes:
+                sub_path = change.metadata.get("submodule_path")
+                if sub_path:
+                    grouped[sub_path].append(change)
+
+            for submodule_path, sub_changes in grouped.items():
+                if not self._ensure_submodule_available(submodule_path):
+                    success = False
+                    break
+
+                target_sha = sub_changes[0].metadata.get("submodule_old_sha")
+                if target_sha:
+                    checkout_cmd = subprocess.run(
+                        ["git", "-C", str(self.repo_path / submodule_path), "checkout", target_sha],
+                        capture_output=True,
+                        text=True,
+                        check=False,
+                    )
+                    if checkout_cmd.returncode != 0:
+                        success = False
+                        break
+
+                combined_sub_patch = "\n".join(change.diff_content for change in sub_changes)
+                if combined_sub_patch.strip():
+                    success = self._apply_patch_in_submodule(submodule_path, combined_sub_patch)
+
+                if not success:
+                    break
 
         if not success and use_temp_branch:
             # Clean up failed temp branch
@@ -292,6 +329,46 @@ class GitRepo:
 
         return success
 
+    def get_submodule_changes(self, submodule_change: FileChange) -> list[FileChange]:
+        """Return parsed changes within a submodule update for deeper analysis."""
+
+        if submodule_change.change_type != "submodule":
+            return []
+
+        from git_bifurcate.parser import parse_file_changes
+
+        submodule_path = submodule_change.file_path
+        old_sha = submodule_change.metadata.get("old_sha")
+        new_sha = submodule_change.metadata.get("new_sha") or self._extract_submodule_commit(
+            submodule_change.diff_content
+        )
+
+        if not old_sha or not new_sha:
+            return []
+
+        if not self._ensure_submodule_available(submodule_path):
+            return []
+
+        diff_cmd = subprocess.run(
+            ["git", "-C", str(self.repo_path / submodule_path), "diff", old_sha, new_sha],
+            capture_output=True,
+            text=True,
+            check=False,
+        )
+        if diff_cmd.returncode != 0:
+            return []
+
+        inner_changes = parse_file_changes(diff_cmd.stdout)
+        for change in inner_changes:
+            change.file_path = f"{submodule_path}/{change.file_path}"
+            change.metadata = {
+                "submodule_path": submodule_path,
+                "submodule_old_sha": old_sha,
+                "submodule_new_sha": new_sha,
+            }
+
+        return inner_changes
+
     def _apply_submodule_changes(self, submodule_changes: list[FileChange]) -> bool:
         """Apply submodule gitlink updates.
 
@@ -302,7 +379,9 @@ class GitRepo:
             True if all submodule updates were applied and staged.
         """
         for change in submodule_changes:
-            new_sha = self._extract_submodule_commit(change.diff_content)
+            new_sha = change.metadata.get("new_sha") or self._extract_submodule_commit(
+                change.diff_content
+            )
             if not new_sha:
                 return False
 
@@ -347,6 +426,37 @@ class GitRepo:
                 return False
 
         return True
+
+    def _ensure_submodule_available(self, path: str) -> bool:
+        """Ensure a submodule exists and is initialized."""
+
+        init_cmd = subprocess.run(
+            ["git", "submodule", "update", "--init", "--recursive", "--", path],
+            cwd=self.repo_path,
+            capture_output=True,
+            text=True,
+            check=False,
+        )
+        return init_cmd.returncode == 0
+
+    def _apply_patch_in_submodule(self, submodule_path: str, patch: str) -> bool:
+        """Apply a patch inside a submodule working tree."""
+
+        try:
+            if not patch.endswith("\n"):
+                patch = patch + "\n"
+
+            result = subprocess.run(
+                ["git", "apply", "--index"],
+                input=patch,
+                cwd=self.repo_path / submodule_path,
+                capture_output=True,
+                text=True,
+                check=False,
+            )
+            return result.returncode == 0
+        except Exception:
+            return False
 
     @staticmethod
     def _extract_submodule_commit(diff_content: str) -> str | None:

@@ -44,6 +44,7 @@ class FileChange:
     change_type: str  # 'modified', 'added', 'deleted', 'renamed'
     diff_content: str
     status: ChangeStatus = ChangeStatus.UNKNOWN
+    metadata: dict[str, Any] = field(default_factory=dict)
 
     def to_dict(self) -> dict[str, Any]:
         """Convert to dictionary for JSON serialization."""
@@ -53,6 +54,7 @@ class FileChange:
             "change_type": self.change_type,
             "diff_content": self.diff_content,
             "status": self.status.value,
+            "metadata": self.metadata,
         }
 
     @classmethod
@@ -64,6 +66,7 @@ class FileChange:
             change_type=data["change_type"],
             diff_content=data["diff_content"],
             status=ChangeStatus(data["status"]),
+            metadata=data.get("metadata", {}),
         )
 
 
@@ -128,9 +131,9 @@ class BifurcationState:
     found_breaking: list[int] = field(default_factory=list)
     current_iteration: int = 0
 
-    def save(self, filepath: Path | str = ".git/bifurcate-state.json") -> None:
+    def save(self, filepath: Path | str | None = None) -> None:
         """Save state to JSON file."""
-        filepath = Path(filepath)
+        filepath = Path(filepath) if filepath else self.default_path()
         filepath.parent.mkdir(parents=True, exist_ok=True)
 
         data = {
@@ -149,9 +152,9 @@ class BifurcationState:
             json.dump(data, f, indent=2)
 
     @classmethod
-    def load(cls, filepath: Path | str = ".git/bifurcate-state.json") -> BifurcationState:
+    def load(cls, filepath: Path | str | None = None) -> BifurcationState:
         """Load state from JSON file."""
-        filepath = Path(filepath)
+        filepath = Path(filepath) if filepath else cls.default_path()
 
         if not filepath.exists():
             msg = f"State file not found: {filepath}"
@@ -181,13 +184,28 @@ class BifurcationState:
         )
 
     @classmethod
-    def exists(cls, filepath: Path | str = ".git/bifurcate-state.json") -> bool:
+    def exists(cls, filepath: Path | str | None = None) -> bool:
         """Check if state file exists."""
-        return Path(filepath).exists()
+        target = Path(filepath) if filepath else cls.default_path()
+        return target.exists()
 
     @staticmethod
-    def delete(filepath: Path | str = ".git/bifurcate-state.json") -> None:
+    def delete(filepath: Path | str | None = None) -> None:
         """Delete state file."""
-        filepath = Path(filepath)
+        filepath = Path(filepath) if filepath else BifurcationState.default_path()
         if filepath.exists():
             filepath.unlink()
+
+    @staticmethod
+    def default_path() -> Path:
+        """Resolve the state file path, supporting git worktrees."""
+
+        try:
+            import git  # Imported lazily to avoid runtime cost when unused
+
+            repo = git.Repo(Path.cwd(), search_parent_directories=True)
+            git_dir = Path(repo.git_dir).resolve()
+            return git_dir / "bifurcate-state.json"
+        except Exception:
+            # Fallback to the historical default when git metadata is unavailable
+            return Path(".git") / "bifurcate-state.json"
