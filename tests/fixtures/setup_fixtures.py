@@ -17,6 +17,14 @@ def run_git(cmd: list[str], cwd: Path) -> None:
     subprocess.run(["git"] + cmd, cwd=cwd, check=True, capture_output=True)
 
 
+def repo_init(repo_path: Path) -> None:
+    run_git(["init"], repo_path)
+    run_git(["config", "user.name", "Test User"], repo_path)
+    run_git(["config", "user.email", "test@example.com"], repo_path)
+    run_git(["config", "commit.gpgsign", "false"], repo_path)
+    run_git(["config", "init.defaultBranch", "main"], repo_path)
+
+
 def setup_simple_file_fixture(fixtures_dir: Path) -> None:
     """Create simple fixture: 4 files modified, file 2 breaks tests.
 
@@ -28,10 +36,7 @@ def setup_simple_file_fixture(fixtures_dir: Path) -> None:
     repo_path.mkdir(parents=True)
 
     # Initialize repo
-    run_git(["init"], repo_path)
-    run_git(["config", "user.name", "Test User"], repo_path)
-    run_git(["config", "user.email", "test@example.com"], repo_path)
-    run_git(["config", "commit.gpgsign", "false"], repo_path)
+    repo_init(repo_path)
 
     # Create initial files - one file per value
     (repo_path / "test.sh").write_text("""#!/bin/bash
@@ -126,10 +131,7 @@ def setup_multiple_files_fixture(fixtures_dir: Path) -> None:
     repo_path.mkdir(parents=True)
 
     # Initialize repo
-    run_git(["init"], repo_path)
-    run_git(["config", "user.name", "Test User"], repo_path)
-    run_git(["config", "user.email", "test@example.com"], repo_path)
-    run_git(["config", "commit.gpgsign", "false"], repo_path)
+    repo_init(repo_path)
 
     # Create initial files
     (repo_path / "test.sh").write_text("""#!/bin/bash
@@ -223,10 +225,7 @@ def setup_hunk_level_fixture(fixtures_dir: Path) -> None:
     repo_path.mkdir(parents=True)
 
     # Initialize repo
-    run_git(["init"], repo_path)
-    run_git(["config", "user.name", "Test User"], repo_path)
-    run_git(["config", "user.email", "test@example.com"], repo_path)
-    run_git(["config", "commit.gpgsign", "false"], repo_path)
+    repo_init(repo_path)
 
     # Create initial file with lots of spacing to create separate hunks
     (repo_path / "calculator.py").write_text("""def add(a, b):
