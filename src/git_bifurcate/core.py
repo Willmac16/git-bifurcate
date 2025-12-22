@@ -321,6 +321,8 @@ class BifurcationEngine:
         This is a bounded search intended for diagnostic use when binary
         search doesn't yield a single culprit. It will reuse cached test
         results where possible.
+
+        Optimization: Use dependency information to prioritize likely combinations.
         """
 
         from itertools import combinations
@@ -342,10 +344,29 @@ class BifurcationEngine:
             def test_func(idxs: list[int]) -> CommandResult:
                 return self._test_changes(file_changes, base_commit, idxs)
 
+        # Optimization: Try pairs with known dependencies first
+        dependent_pairs = self._get_dependent_pairs(changes)
+        for pair in dependent_pairs:
+            if tests_run >= max_combinations:
+                return None
+
+            result = test_func(list(pair))
+            tests_run += 1
+
+            if result == CommandResult.FAIL:
+                self.interaction_failure = list(pair)
+                return self.interaction_failure
+
+        # Then try all combinations systematically
         for size in range(2, min(total, 4) + 1):
             for combo in combinations(range(total), size):
                 if tests_run >= max_combinations:
                     return None
+
+                # Skip if already tested
+                cache_key = self._get_combination_key(list(combo))
+                if cache_key in self.tested_combinations:
+                    continue
 
                 result = test_func(list(combo))
                 tests_run += 1
@@ -355,6 +376,32 @@ class BifurcationEngine:
                     return self.interaction_failure
 
         return None
+
+    def _get_dependent_pairs(
+        self, changes: list[FileChange] | list[HunkChange]
+    ) -> list[tuple[int, int]]:
+        """Get pairs of changes that have dependencies.
+
+        Args:
+            changes: List of changes to analyze.
+
+        Returns:
+            List of (index1, index2) tuples for dependent pairs.
+        """
+        pairs = []
+        id_to_idx = {change.id: i for i, change in enumerate(changes)}
+
+        for i, change in enumerate(changes):
+            for dep_id in change.dependencies:
+                if dep_id in id_to_idx:
+                    dep_idx = id_to_idx[dep_id]
+                    if dep_idx < i:  # Ensure consistent ordering
+                        pairs.append((dep_idx, i))
+                    else:
+                        pairs.append((i, dep_idx))
+
+        # Remove duplicates
+        return list(set(pairs))
 
     def get_stats(self) -> dict[str, int]:
         """Get statistics about bifurcation session.

@@ -45,6 +45,7 @@ class FileChange:
     diff_content: str
     status: ChangeStatus = ChangeStatus.UNKNOWN
     metadata: dict[str, Any] = field(default_factory=dict)
+    dependencies: list[str] = field(default_factory=list)  # IDs of changes this depends on
 
     def to_dict(self) -> dict[str, Any]:
         """Convert to dictionary for JSON serialization."""
@@ -55,6 +56,7 @@ class FileChange:
             "diff_content": self.diff_content,
             "status": self.status.value,
             "metadata": self.metadata,
+            "dependencies": self.dependencies,
         }
 
     @classmethod
@@ -67,6 +69,7 @@ class FileChange:
             diff_content=data["diff_content"],
             status=ChangeStatus(data["status"]),
             metadata=data.get("metadata", {}),
+            dependencies=data.get("dependencies", []),
         )
 
 
@@ -84,6 +87,7 @@ class HunkChange:
     new_length: int
     diff_content: str
     status: ChangeStatus = ChangeStatus.UNKNOWN
+    dependencies: list[str] = field(default_factory=list)  # IDs of hunks this depends on
 
     def to_dict(self) -> dict[str, Any]:
         """Convert to dictionary for JSON serialization."""
@@ -98,6 +102,7 @@ class HunkChange:
             "new_length": self.new_length,
             "diff_content": self.diff_content,
             "status": self.status.value,
+            "dependencies": self.dependencies,
         }
 
     @classmethod
@@ -114,6 +119,7 @@ class HunkChange:
             new_length=data["new_length"],
             diff_content=data["diff_content"],
             status=ChangeStatus(data["status"]),
+            dependencies=data.get("dependencies", []),
         )
 
 
