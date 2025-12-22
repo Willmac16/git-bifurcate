@@ -36,11 +36,6 @@ jobs:
       run: |
         uv run ruff format --check src tests
 
-    - name: Run mypy type checker
-      run: |
-        uv run mypy src
-      continue-on-error: true  # Don't fail CI on type errors initially
-
     - name: Run ty type checker
       run: |
         uv run ty check src
