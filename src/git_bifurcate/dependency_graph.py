@@ -295,7 +295,7 @@ class DependencyGraph:
         }
 
 
-def build_dependency_graph(changes: list[T]) -> DependencyGraph:
+def build_dependency_graph[T: (FileChange, HunkChange)](changes: list[T]) -> DependencyGraph:
     """Build a dependency graph from a list of changes.
 
     Args:
