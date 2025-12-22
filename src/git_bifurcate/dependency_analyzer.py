@@ -9,7 +9,6 @@ from __future__ import annotations
 import ast
 import re
 from pathlib import Path
-from typing import Any
 
 from git_bifurcate.models import FileChange, HunkChange
 
@@ -146,10 +145,9 @@ class DependencyAnalyzer:
                     # References to names
                     if isinstance(node.ctx, ast.Load):
                         references.add(node.id)
-                elif isinstance(node, ast.Attribute):
+                elif isinstance(node, ast.Attribute) and isinstance(node.value, ast.Name):
                     # Handle attribute access (e.g., module.function)
-                    if isinstance(node.value, ast.Name):
-                        references.add(node.value.id)
+                    references.add(node.value.id)
 
         except SyntaxError:
             # If parsing fails, fall back to regex
@@ -214,9 +212,8 @@ class DependencyAnalyzer:
                         for alias in node.names:
                             name = alias.asname if alias.asname else alias.name
                             definitions.add(name)
-                    elif isinstance(node, ast.ImportFrom):
-                        if node.module:
-                            references.add(node.module)
+                    elif isinstance(node, ast.ImportFrom) and node.module:
+                        references.add(node.module)
 
             except SyntaxError:
                 # Fall back to regex
@@ -532,9 +529,6 @@ class DependencyAnalyzer:
         """
         dependencies: dict[str, list[str]] = {change.id: [] for change in changes}
 
-        # Build map of file paths to change IDs
-        path_to_id = {change.file_path: change.id for change in changes}
-
         for change in changes:
             if not change.file_path.endswith(".py"):
                 continue
@@ -546,19 +540,18 @@ class DependencyAnalyzer:
                 tree = ast.parse(code)
 
                 for node in ast.walk(tree):
-                    if isinstance(node, ast.ImportFrom):
-                        if node.module:
-                            # Convert module path to file path
-                            module_parts = node.module.split(".")
-                            # Try to find matching file in changes
-                            for other_change in changes:
-                                if other_change.id == change.id:
-                                    continue
+                    if isinstance(node, ast.ImportFrom) and node.module:
+                        # Convert module path to file path
+                        module_parts = node.module.split(".")
+                        # Try to find matching file in changes
+                        for other_change in changes:
+                            if other_change.id == change.id:
+                                continue
 
-                                other_path = Path(other_change.file_path)
-                                # Simple heuristic: check if module name matches file
-                                if any(part in other_path.stem for part in module_parts):
-                                    dependencies[change.id].append(other_change.id)
+                            other_path = Path(other_change.file_path)
+                            # Simple heuristic: check if module name matches file
+                            if any(part in other_path.stem for part in module_parts):
+                                dependencies[change.id].append(other_change.id)
 
             except SyntaxError:
                 pass
@@ -589,7 +582,7 @@ class DependencyAnalyzer:
             file_hunks[hunk.file_path].append(hunk)
 
         # Check proximity within each file
-        for file_path, file_hunk_list in file_hunks.items():
+        for _file_path, file_hunk_list in file_hunks.items():
             for i, hunk1 in enumerate(file_hunk_list):
                 for hunk2 in file_hunk_list[i + 1 :]:
                     # If hunks are within 5 lines, they may be dependent

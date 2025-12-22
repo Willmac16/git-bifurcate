@@ -11,15 +11,14 @@ Benchmarks for performance regression testing across:
 from __future__ import annotations
 
 import time
+from collections.abc import Callable
 from dataclasses import dataclass
-from typing import Any, Callable
+from typing import Any
 
 from git_bifurcate.core import BifurcationEngine
 from git_bifurcate.dependency_analyzer import DependencyAnalyzer
 from git_bifurcate.dependency_graph import DependencyGraph
-from git_bifurcate.git_ops import GitRepo
-from git_bifurcate.models import ChangeStatus, CommandResult, FileChange, HunkChange
-from git_bifurcate.test_runner import CommandRunner
+from git_bifurcate.models import ChangeStatus, CommandResult, FileChange
 
 
 @dataclass

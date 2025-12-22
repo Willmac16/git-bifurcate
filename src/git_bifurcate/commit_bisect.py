@@ -180,12 +180,12 @@ class CommitBisector:
                 # Bug is in first half (including this commit)
                 search_space = search_space[:mid + 1]
                 if verbose:
-                    click.echo(f"  Result: FAIL - narrowing to earlier commits")
+                    click.echo("  Result: FAIL - narrowing to earlier commits")
             elif result == CommandResult.PASS:
                 # Bug is in second half (after this commit)
                 search_space = search_space[mid + 1 :]
                 if verbose:
-                    click.echo(f"  Result: PASS - narrowing to later commits")
+                    click.echo("  Result: PASS - narrowing to later commits")
             else:
                 # Skip or error - try to continue
                 if verbose:
