@@ -45,5 +45,5 @@ if $run_lint; then
 fi
 
 if $run_tests; then
-  uv run pytest --cov=git_bifurcate --cov-report=xml --cov-report=term-missing --cov-report=html
+  uv run pytest --cov=git_bifurcate --cov-report=xml --cov-report=term-missing --cov-report=html --cov-fail-under=99.9
 fi
