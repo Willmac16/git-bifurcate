@@ -567,6 +567,7 @@ def test_apply_changes_submodule(git_repo: Path, temp_dir: Path) -> None:
     subprocess.run(["git", "config", "user.name", "Test User"], cwd=sub_repo, check=True)
     subprocess.run(["git", "config", "user.email", "test@example.com"], cwd=sub_repo, check=True)
     subprocess.run(["git", "config", "commit.gpgsign", "false"], cwd=sub_repo, check=True)
+    subprocess.run(["git", "config", "commit.gpgsign", "false"], cwd=sub_repo, check=True)
 
     # Initial commit
     (sub_repo / "dep.txt").write_text("v1\n")
@@ -603,6 +604,9 @@ def test_apply_changes_submodule(git_repo: Path, temp_dir: Path) -> None:
     )
     subprocess.run(
         ["git", "-C", str(submodule_clone), "config", "user.email", "test@example.com"], check=True
+    )
+    subprocess.run(
+        ["git", "-C", str(submodule_clone), "config", "commit.gpgsign", "false"], check=True
     )
     subprocess.run(
         ["git", "-C", str(submodule_clone), "config", "commit.gpgsign", "false"], check=True
@@ -656,6 +660,7 @@ def test_get_submodule_changes(git_repo: Path, temp_dir: Path) -> None:
     subprocess.run(["git", "init"], cwd=sub_repo, check=True, capture_output=True)
     subprocess.run(["git", "config", "user.name", "Test User"], cwd=sub_repo, check=True)
     subprocess.run(["git", "config", "user.email", "test@example.com"], cwd=sub_repo, check=True)
+    subprocess.run(["git", "config", "commit.gpgsign", "false"], cwd=sub_repo, check=True)
 
     (sub_repo / "dep.txt").write_text("v1\n")
     subprocess.run(["git", "add", "dep.txt"], cwd=sub_repo, check=True, capture_output=True)
@@ -686,6 +691,9 @@ def test_get_submodule_changes(git_repo: Path, temp_dir: Path) -> None:
     )
     subprocess.run(
         ["git", "-C", str(submodule_clone), "config", "user.email", "test@example.com"], check=True
+    )
+    subprocess.run(
+        ["git", "-C", str(submodule_clone), "config", "commit.gpgsign", "false"], check=True
     )
     old_sha = subprocess.run(
         ["git", "-C", str(submodule_clone), "rev-parse", "HEAD"],
@@ -733,6 +741,7 @@ def test_apply_nested_submodule_changes(git_repo: Path, temp_dir: Path) -> None:
     subprocess.run(["git", "init"], cwd=sub_repo, check=True, capture_output=True)
     subprocess.run(["git", "config", "user.name", "Test User"], cwd=sub_repo, check=True)
     subprocess.run(["git", "config", "user.email", "test@example.com"], cwd=sub_repo, check=True)
+    subprocess.run(["git", "config", "commit.gpgsign", "false"], cwd=sub_repo, check=True)
 
     (sub_repo / "dep.txt").write_text("v1\n")
     subprocess.run(["git", "add", "dep.txt"], cwd=sub_repo, check=True, capture_output=True)
@@ -763,6 +772,9 @@ def test_apply_nested_submodule_changes(git_repo: Path, temp_dir: Path) -> None:
     )
     subprocess.run(
         ["git", "-C", str(submodule_clone), "config", "user.email", "test@example.com"], check=True
+    )
+    subprocess.run(
+        ["git", "-C", str(submodule_clone), "config", "commit.gpgsign", "false"], check=True
     )
 
     (submodule_clone / "dep.txt").write_text("v2\n")
@@ -1560,9 +1572,9 @@ def test_apply_hunk_changes_reset_failure_non_temp(
     assert not repo.apply_hunk_changes([sample_hunk], "HEAD", "HEAD", use_temp_branch=False)
 
 
-def test_extract_file_header_without_hunks() -> None:
+def test_extract_file_header_without_hunks(git_repo: Path) -> None:
     """If the diff moves to the next file without hunks, None is returned."""
-    repo = GitRepo()
+    repo = GitRepo(git_repo)
     diff = """diff --git a/a.txt b/a.txt
 index 1..2 100644
 --- a/a.txt
@@ -1573,3 +1585,132 @@ diff --git a/b.txt b/b.txt
 +y"""
 
     assert repo._extract_file_header(diff, "a.txt") is None
+
+
+def test_get_submodule_changes_with_inner_changes(git_repo: Path, temp_dir: Path) -> None:
+    """Test get_submodule_changes when submodule has inner file changes."""
+    # Create a submodule repo
+    sub_repo = temp_dir / "sub_with_changes"
+    sub_repo.mkdir()
+
+    subprocess.run(["git", "init"], cwd=sub_repo, check=True, capture_output=True)
+    subprocess.run(["git", "config", "user.name", "Test User"], cwd=sub_repo, check=True)
+    subprocess.run(["git", "config", "user.email", "test@example.com"], cwd=sub_repo, check=True)
+    subprocess.run(["git", "config", "commit.gpgsign", "false"], cwd=sub_repo, check=True)
+
+    # Create initial commit
+    (sub_repo / "file1.txt").write_text("v1\n")
+    subprocess.run(["git", "add", "file1.txt"], cwd=sub_repo, check=True, capture_output=True)
+    subprocess.run(
+        ["git", "commit", "-m", "Initial"], cwd=sub_repo, check=True, capture_output=True
+    )
+    old_sha = subprocess.run(
+        ["git", "rev-parse", "HEAD"], cwd=sub_repo, check=True, capture_output=True, text=True
+    ).stdout.strip()
+
+    # Make a change
+    (sub_repo / "file1.txt").write_text("v2\n")
+    (sub_repo / "file2.txt").write_text("new\n")
+    subprocess.run(["git", "add", "."], cwd=sub_repo, check=True, capture_output=True)
+    subprocess.run(
+        ["git", "commit", "-m", "Changes"], cwd=sub_repo, check=True, capture_output=True
+    )
+    new_sha = subprocess.run(
+        ["git", "rev-parse", "HEAD"], cwd=sub_repo, check=True, capture_output=True, text=True
+    ).stdout.strip()
+
+    # Add submodule to main repo
+    subprocess.run(
+        [
+            "git",
+            "-c",
+            "protocol.file.allow=always",
+            "submodule",
+            "add",
+            str(sub_repo),
+            "vendor/lib",
+        ],
+        cwd=git_repo,
+        check=True,
+        capture_output=True,
+    )
+    subprocess.run(
+        ["git", "commit", "-am", "Add submodule"], cwd=git_repo, check=True, capture_output=True
+    )
+
+    # Create a FileChange representing submodule update
+    repo = GitRepo(git_repo)
+    change = FileChange(
+        "1",
+        "vendor/lib",
+        "submodule",
+        "diff",
+        ChangeStatus.UNKNOWN,
+        metadata={"old_sha": old_sha, "new_sha": new_sha},
+    )
+
+    # Get inner changes
+    inner_changes = repo.get_submodule_changes(change)
+
+    # Should have inner changes for the files that changed
+    assert len(inner_changes) > 0
+    # All should have submodule path prefix
+    for ic in inner_changes:
+        assert ic.file_path.startswith("vendor/lib/")
+        assert "submodule_path" in ic.metadata
+        assert ic.metadata["submodule_old_sha"] == old_sha
+        assert ic.metadata["submodule_new_sha"] == new_sha
+
+
+def test_ensure_submodule_available(git_repo: Path, temp_dir: Path) -> None:
+    """Test _ensure_submodule_available method."""
+    # Create a submodule
+    sub_repo = temp_dir / "sub_for_init"
+    sub_repo.mkdir()
+
+    subprocess.run(["git", "init"], cwd=sub_repo, check=True, capture_output=True)
+    subprocess.run(["git", "config", "user.name", "Test User"], cwd=sub_repo, check=True)
+    subprocess.run(["git", "config", "user.email", "test@example.com"], cwd=sub_repo, check=True)
+    subprocess.run(["git", "config", "commit.gpgsign", "false"], cwd=sub_repo, check=True)
+
+    (sub_repo / "readme.txt").write_text("readme\n")
+    subprocess.run(["git", "add", "readme.txt"], cwd=sub_repo, check=True, capture_output=True)
+    subprocess.run(
+        ["git", "commit", "-m", "Initial"], cwd=sub_repo, check=True, capture_output=True
+    )
+
+    # Add as submodule
+    subprocess.run(
+        [
+            "git",
+            "-c",
+            "protocol.file.allow=always",
+            "submodule",
+            "add",
+            str(sub_repo),
+            "vendor/sub",
+        ],
+        cwd=git_repo,
+        check=True,
+        capture_output=True,
+    )
+    subprocess.run(
+        ["git", "commit", "-am", "Add sub"], cwd=git_repo, check=True, capture_output=True
+    )
+
+    # Deinit the submodule
+    subprocess.run(
+        ["git", "submodule", "deinit", "-f", "vendor/sub"],
+        cwd=git_repo,
+        check=True,
+        capture_output=True,
+    )
+
+    repo = GitRepo(git_repo)
+
+    # Should be able to ensure it's available
+    result = repo._ensure_submodule_available("vendor/sub")
+    assert result is True
+
+    # Verify it's actually initialized now
+    assert (git_repo / "vendor" / "sub" / "readme.txt").exists()
