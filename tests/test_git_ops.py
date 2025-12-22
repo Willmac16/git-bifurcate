@@ -4,8 +4,10 @@ from __future__ import annotations
 
 import subprocess
 from pathlib import Path
+from types import SimpleNamespace
 
 import pytest
+import git
 
 from git_bifurcate.git_ops import GitOperationError, GitRepo
 from git_bifurcate.models import ChangeStatus, FileChange
@@ -640,3 +642,624 @@ def test_apply_changes_submodule(git_repo: Path, temp_dir: Path) -> None:
         text=True,
     ).stdout.strip()
     assert current_sha == new_sha
+
+
+def test_get_parent_commit_merge_commit(git_repo: Path) -> None:
+    """Ensure merge commits raise an error when asking for a single parent."""
+    base = create_commit(git_repo, "base.txt", "base", "base")
+
+    subprocess.run(["git", "checkout", "-b", "feature"], cwd=git_repo, check=True, capture_output=True)
+    feature = create_commit(git_repo, "feature.txt", "feature", "feature change")
+
+    subprocess.run(["git", "checkout", "master"], cwd=git_repo, check=True, capture_output=True)
+    _master_change = create_commit(git_repo, "master.txt", "master", "master change")
+
+    subprocess.run(
+        ["git", "merge", "--no-ff", "feature", "-m", "Merge feature"],
+        cwd=git_repo,
+        check=True,
+        capture_output=True,
+    )
+    merge_sha = subprocess.run(
+        ["git", "rev-parse", "HEAD"], cwd=git_repo, check=True, capture_output=True, text=True
+    ).stdout.strip()
+
+    repo = GitRepo(git_repo)
+    with pytest.raises(GitOperationError, match="merge commit"):
+        repo.get_parent_commit(merge_sha)
+    assert base  # silence unused variable lints
+
+
+def test_get_diff_failure(monkeypatch: pytest.MonkeyPatch, git_repo: Path) -> None:
+    """get_diff surfaces subprocess failures as GitOperationError."""
+    repo = GitRepo(git_repo)
+
+    def bad_run(*args, **kwargs):
+        raise subprocess.CalledProcessError(returncode=1, cmd=args[0], stderr="boom")
+
+    monkeypatch.setattr(subprocess, "run", bad_run)
+
+    with pytest.raises(GitOperationError, match="Failed to get diff"):
+        repo.get_diff("child", "parent")
+
+
+def test_checkout_best_effort_submodules(
+    monkeypatch: pytest.MonkeyPatch, git_repo: Path
+) -> None:
+    """Checkout should ignore submodule update failures but still succeed."""
+    first_sha = create_commit(git_repo, "file.txt", "one", "first")
+    second_sha = create_commit(git_repo, "file.txt", "two", "second")
+
+    repo = GitRepo(git_repo)
+    (git_repo / ".gitmodules").write_text('[submodule "lib"]\n\tpath = lib\n\turl = url\n')
+
+    def fake_submodule(*args, **kwargs):
+        raise git.GitCommandError("submodule", 1, "failure")
+
+    monkeypatch.setattr(type(repo.repo.git), "submodule", fake_submodule, raising=False)
+
+    repo.checkout(first_sha)
+    assert (git_repo / "file.txt").read_text() == "one"
+
+    repo.checkout(second_sha)
+    assert (git_repo / "file.txt").read_text() == "two"
+
+
+def test_checkout_failure(monkeypatch: pytest.MonkeyPatch, git_repo: Path) -> None:
+    """Checkout errors are wrapped in GitOperationError."""
+    create_commit(git_repo, "file.txt", "content", "msg")
+    repo = GitRepo(git_repo)
+
+    def bad_checkout(*args, **kwargs):
+        raise git.GitCommandError("checkout", 1, "fail")
+
+    monkeypatch.setattr(type(repo.repo.git), "checkout", bad_checkout, raising=False)
+
+    with pytest.raises(GitOperationError):
+        repo.checkout("HEAD")
+
+
+def test_create_temp_branch_failure(monkeypatch: pytest.MonkeyPatch, git_repo: Path) -> None:
+    """Branch creation errors propagate as GitOperationError."""
+    head_sha = create_commit(git_repo, "file.txt", "data", "message")
+    repo = GitRepo(git_repo)
+
+    def bad_create_head(*args, **kwargs):
+        raise git.GitCommandError("create", 1, "nope")
+
+    monkeypatch.setattr(repo.repo, "create_head", bad_create_head)
+
+    with pytest.raises(GitOperationError):
+        repo.create_temp_branch("temp", head_sha)
+
+
+def test_delete_branch_failure(monkeypatch: pytest.MonkeyPatch, git_repo: Path) -> None:
+    """Branch deletion errors propagate as GitOperationError."""
+    sha = create_commit(git_repo, "file.txt", "data", "message")
+    repo = GitRepo(git_repo)
+    repo.create_temp_branch("todelete", sha)
+    repo.checkout(sha)
+
+    def bad_delete_head(*args, **kwargs):
+        raise git.GitCommandError("delete", 1, "oops")
+
+    monkeypatch.setattr(repo.repo, "delete_head", bad_delete_head)
+
+    with pytest.raises(GitOperationError):
+        repo.delete_branch("todelete")
+
+
+def test_apply_patch_exception(monkeypatch: pytest.MonkeyPatch, git_repo: Path) -> None:
+    """Unexpected subprocess errors return False."""
+    repo = GitRepo(git_repo)
+
+    def explode(*args, **kwargs):
+        raise ValueError("kaboom")
+
+    monkeypatch.setattr(subprocess, "run", explode)
+    assert not repo.apply_patch("diff --git a/file b/file")
+
+
+def test_apply_changes_failed_patch_cleanup_error(
+    monkeypatch: pytest.MonkeyPatch, git_repo: Path
+) -> None:
+    """Failed patch applications handle cleanup errors gracefully."""
+    base = create_commit(git_repo, "file.txt", "v1\n", "msg")
+    repo = GitRepo(git_repo)
+
+    change = FileChange("1", "file.txt", "modified", "diff", status=ChangeStatus.UNKNOWN)
+    monkeypatch.setattr(repo, "apply_patch", lambda patch: False)
+    monkeypatch.setattr(repo, "create_temp_branch", lambda name, base_commit: None)
+
+    def bad_checkout(*args, **kwargs):
+        raise git.GitCommandError("checkout", 1, "fail")
+
+    monkeypatch.setattr(type(repo.repo.git), "checkout", bad_checkout, raising=False)
+
+    assert not repo.apply_changes([change], base, use_temp_branch=True)
+
+
+def test_reset_hard_failure(monkeypatch: pytest.MonkeyPatch, git_repo: Path) -> None:
+    """Hard reset failures raise GitOperationError."""
+    create_commit(git_repo, "file.txt", "data", "message")
+    repo = GitRepo(git_repo)
+
+    def bad_reset(*args, **kwargs):
+        raise git.GitCommandError("reset", 1, "fail")
+
+    fake_repo = SimpleNamespace(head=SimpleNamespace(reset=bad_reset))
+    monkeypatch.setattr(repo, "repo", fake_repo)
+
+    with pytest.raises(GitOperationError):
+        repo.reset_hard("HEAD")
+
+
+def test_commit_failure(monkeypatch: pytest.MonkeyPatch, git_repo: Path) -> None:
+    """Index commit failures raise GitOperationError."""
+    create_commit(git_repo, "file.txt", "data", "message")
+    (git_repo / "file.txt").write_text("changed")
+    subprocess.run(["git", "add", "file.txt"], cwd=git_repo, check=True, capture_output=True)
+
+    repo = GitRepo(git_repo)
+
+    def bad_commit(*args, **kwargs):
+        raise git.GitCommandError("commit", 1, "nope")
+
+    monkeypatch.setattr(repo, "repo", SimpleNamespace(index=SimpleNamespace(commit=bad_commit)))
+
+    with pytest.raises(GitOperationError):
+        repo.commit("msg")
+
+
+def test_apply_changes_detached_head(monkeypatch: pytest.MonkeyPatch, git_repo: Path) -> None:
+    """apply_changes records detached HEAD hexsha when ref.name fails."""
+    base = create_commit(git_repo, "file.txt", "data", "message")
+    repo = GitRepo(git_repo)
+
+    class FakeHead:
+        def __init__(self, hexsha: str) -> None:
+            self.commit = SimpleNamespace(hexsha=hexsha)
+
+        @property
+        def ref(self) -> str:  # pragma: no cover - property intentionally raises
+            raise TypeError("detached")
+
+    monkeypatch.setattr(repo, "repo", SimpleNamespace(head=FakeHead(base)))
+    monkeypatch.setattr(repo, "create_temp_branch", lambda name, base_commit: None)
+
+    success = repo.apply_changes([], base, use_temp_branch=True)
+    assert success
+
+
+def test_apply_changes_temp_branch_failure(monkeypatch: pytest.MonkeyPatch, git_repo: Path) -> None:
+    """apply_changes returns False when temp branch cannot be created."""
+    base = create_commit(git_repo, "file.txt", "data", "message")
+    repo = GitRepo(git_repo)
+
+    def bad_create(*args, **kwargs):
+        raise GitOperationError("no branch")
+
+    monkeypatch.setattr(repo, "create_temp_branch", bad_create)
+
+    assert not repo.apply_changes([], base, use_temp_branch=True)
+
+
+def test_apply_changes_reset_failure_without_temp(monkeypatch: pytest.MonkeyPatch, git_repo: Path) -> None:
+    """Reset failures when not using temp branches return False."""
+    base = create_commit(git_repo, "file.txt", "data", "message")
+    repo = GitRepo(git_repo)
+
+    def bad_reset(*args, **kwargs):
+        raise GitOperationError("nope")
+
+    monkeypatch.setattr(repo, "reset_hard", bad_reset)
+    assert not repo.apply_changes([], base, use_temp_branch=False)
+
+
+def test_apply_changes_submodule_cleanup_failure(
+    monkeypatch: pytest.MonkeyPatch, git_repo: Path
+) -> None:
+    """Submodule failures while using temp branches attempt cleanup."""
+    base = create_commit(git_repo, "file.txt", "data", "message")
+    repo = GitRepo(git_repo)
+
+    change = FileChange(
+        id="1",
+        file_path="submodule/path",
+        change_type="submodule",
+        diff_content="+Subproject commit deadbeef",
+        status=ChangeStatus.UNKNOWN,
+    )
+
+    monkeypatch.setattr(repo, "_apply_submodule_changes", lambda changes: False)
+    monkeypatch.setattr(type(repo.repo.git), "checkout", lambda *args, **kwargs: None, raising=False)
+    monkeypatch.setattr(repo, "create_temp_branch", lambda name, base_commit: None)
+    deleted = {"called": False}
+    monkeypatch.setattr(repo, "delete_branch", lambda name: deleted.__setitem__("called", True))
+
+    assert not repo.apply_changes([change], base, use_temp_branch=True)
+    assert deleted["called"]
+
+
+def test_apply_changes_submodule_cleanup_checkout_error(
+    monkeypatch: pytest.MonkeyPatch, git_repo: Path
+) -> None:
+    """Cleanup ignores checkout errors when submodule application fails."""
+    base = create_commit(git_repo, "file.txt", "data", "message")
+    repo = GitRepo(git_repo)
+
+    change = FileChange(
+        id="1",
+        file_path="submodule/path",
+        change_type="submodule",
+        diff_content="+Subproject commit deadbeef",
+        status=ChangeStatus.UNKNOWN,
+    )
+
+    monkeypatch.setattr(repo, "_apply_submodule_changes", lambda changes: False)
+
+    def bad_checkout(*args, **kwargs):
+        raise git.GitCommandError("checkout", 1, "fail")
+
+    monkeypatch.setattr(type(repo.repo.git), "checkout", bad_checkout, raising=False)
+    monkeypatch.setattr(repo, "create_temp_branch", lambda name, base_commit: None)
+
+    assert not repo.apply_changes([change], base, use_temp_branch=True)
+
+
+def test_apply_submodule_changes_missing_commit(git_repo: Path) -> None:
+    """Missing gitlink commit returns False and stops processing."""
+    repo = GitRepo(git_repo)
+    change = FileChange(
+        id="1",
+        file_path="sub",
+        change_type="submodule",
+        diff_content="diff --git a/sub b/sub",
+        status=ChangeStatus.UNKNOWN,
+    )
+
+    assert not repo._apply_submodule_changes([change])
+    assert repo._extract_submodule_commit(change.diff_content) is None
+
+
+def test_apply_submodule_changes_init_failure(
+    monkeypatch: pytest.MonkeyPatch, git_repo: Path
+) -> None:
+    """Failing submodule init short-circuits processing."""
+    repo = GitRepo(git_repo)
+    change = FileChange(
+        id="1",
+        file_path="sub",
+        change_type="submodule",
+        diff_content="+Subproject commit cafe",
+        status=ChangeStatus.UNKNOWN,
+    )
+
+    class Dummy:
+        def __init__(self, returncode: int) -> None:
+            self.returncode = returncode
+            self.stdout = ""
+            self.stderr = ""
+
+    def fake_run(*args, **kwargs):
+        return Dummy(1)
+
+    monkeypatch.setattr(subprocess, "run", fake_run)
+    assert not repo._apply_submodule_changes([change])
+
+
+def test_apply_submodule_changes_checkout_and_add_failures(
+    monkeypatch: pytest.MonkeyPatch, git_repo: Path
+) -> None:
+    """Submodule checkout or add failures are reported."""
+    repo = GitRepo(git_repo)
+    change = FileChange(
+        id="1",
+        file_path="sub",
+        change_type="submodule",
+        diff_content="+Subproject commit cafe",
+        status=ChangeStatus.UNKNOWN,
+    )
+
+    class Dummy:
+        def __init__(self, returncode: int) -> None:
+            self.returncode = returncode
+            self.stdout = ""
+            self.stderr = ""
+
+    def fail_on_checkout(*args, **kwargs):
+        cmd = args[0]
+        checkout_prefix = ["git", "-C", str(repo.repo_path / "sub"), "checkout"]
+        if cmd[:2] == ["git", "submodule"]:
+            return Dummy(0)
+        if cmd[:4] == checkout_prefix:
+            return Dummy(1)
+        if cmd[:2] == ["git", "add"]:
+            return Dummy(0)
+        return Dummy(0)
+
+    monkeypatch.setattr(subprocess, "run", fail_on_checkout)
+    assert not repo._apply_submodule_changes([change])
+
+    call_state = {"step": 0}
+
+    def fail_on_add(*args, **kwargs):
+        call_state["step"] += 1
+        if call_state["step"] == 1:
+            return Dummy(0)
+        if call_state["step"] == 2:
+            return Dummy(0)
+        if call_state["step"] == 3:
+            return Dummy(0)
+        return Dummy(1)
+
+    monkeypatch.setattr(subprocess, "run", fail_on_add)
+    assert not repo._apply_submodule_changes([change])
+
+
+def test_apply_hunk_changes_reset_failure(
+    monkeypatch: pytest.MonkeyPatch, git_repo: Path
+) -> None:
+    """Reset failures with empty hunks return False."""
+    repo = GitRepo(git_repo)
+    create_commit(git_repo, "file.txt", "content\n", "msg")
+
+    def bad_reset(*args, **kwargs):
+        raise GitOperationError("cannot reset")
+
+    monkeypatch.setattr(repo, "reset_hard", bad_reset)
+    assert not repo.apply_hunk_changes([], "HEAD", "HEAD", use_temp_branch=False)
+
+
+def test_apply_hunk_changes_temp_branch_missing_header(
+    monkeypatch: pytest.MonkeyPatch, git_repo: Path
+) -> None:
+    """Missing file headers trigger cleanup when using temp branches."""
+    repo = GitRepo(git_repo)
+    base = create_commit(git_repo, "file.txt", "one\n", "msg")
+    from git_bifurcate.models import HunkChange
+
+    sample_hunk = HunkChange(
+        id="1",
+        file_path="file.txt",
+        start_line=1,
+        end_line=1,
+        original_start=1,
+        original_length=1,
+        new_start=1,
+        new_length=1,
+        diff_content="@@ -1 +1 @@\n-one\n+two\n",
+        status=ChangeStatus.UNKNOWN,
+    )
+
+    monkeypatch.setattr(repo, "get_diff", lambda bad, base_commit: "diff --git a/x b/x")
+    monkeypatch.setattr(repo, "_extract_file_header", lambda full, path: None)
+
+    def bad_checkout(*args, **kwargs):
+        raise git.GitCommandError("checkout", 1, "fail")
+
+    monkeypatch.setattr(type(repo.repo.git), "checkout", bad_checkout, raising=False)
+    monkeypatch.setattr(repo, "create_temp_branch", lambda name, commit: None)
+
+    assert not repo.apply_hunk_changes([sample_hunk], base, base, use_temp_branch=True)
+
+
+def test_apply_hunk_changes_detached_head(monkeypatch: pytest.MonkeyPatch, git_repo: Path) -> None:
+    """Detached HEAD path stores commit hexsha."""
+    base = create_commit(git_repo, "file.txt", "one\n", "msg")
+    repo = GitRepo(git_repo)
+    from git_bifurcate.models import HunkChange
+
+    class FakeHead:
+        def __init__(self, hexsha: str) -> None:
+            self.commit = SimpleNamespace(hexsha=hexsha)
+
+        @property
+        def ref(self) -> str:  # pragma: no cover - intentionally raises
+            raise TypeError("detached")
+
+    diff_text = """diff --git a/file.txt b/file.txt
+index 1..2 100644
+--- a/file.txt
++++ b/file.txt
+@@ -1 +1 @@
+-one
++two"""
+
+    sample_hunk = HunkChange(
+        id="1",
+        file_path="file.txt",
+        start_line=1,
+        end_line=1,
+        original_start=1,
+        original_length=1,
+        new_start=1,
+        new_length=1,
+        diff_content="@@ -1 +1 @@\n-one\n+two\n",
+        status=ChangeStatus.UNKNOWN,
+    )
+
+    monkeypatch.setattr(repo, "create_temp_branch", lambda name, commit: None)
+    monkeypatch.setattr(repo, "get_diff", lambda bad, base_commit: diff_text)
+    monkeypatch.setattr(repo, "apply_patch", lambda patch: True)
+    monkeypatch.setattr(repo, "repo", SimpleNamespace(head=FakeHead(base), git=SimpleNamespace(checkout=lambda *args, **kwargs: None)))
+
+    assert repo.apply_hunk_changes([sample_hunk], base, base, use_temp_branch=True)
+
+
+def test_apply_hunk_changes_create_branch_failure(
+    monkeypatch: pytest.MonkeyPatch, git_repo: Path
+) -> None:
+    """Branch creation failure bubbles up as False."""
+    base = create_commit(git_repo, "file.txt", "one\n", "msg")
+    repo = GitRepo(git_repo)
+    from git_bifurcate.models import HunkChange
+
+    sample_hunk = HunkChange(
+        id="1",
+        file_path="file.txt",
+        start_line=1,
+        end_line=1,
+        original_start=1,
+        original_length=1,
+        new_start=1,
+        new_length=1,
+        diff_content="@@ -1 +1 @@\n-one\n+two\n",
+        status=ChangeStatus.UNKNOWN,
+    )
+
+    monkeypatch.setattr(repo, "create_temp_branch", lambda name, commit: (_ for _ in ()).throw(GitOperationError("no branch")))
+    assert not repo.apply_hunk_changes([sample_hunk], base, base, use_temp_branch=True)
+
+
+def test_apply_hunk_changes_header_cleanup_calls_delete(
+    monkeypatch: pytest.MonkeyPatch, git_repo: Path
+) -> None:
+    """Cleanup when headers are missing calls delete_branch."""
+    base = create_commit(git_repo, "file.txt", "one\n", "msg")
+    repo = GitRepo(git_repo)
+    from git_bifurcate.models import HunkChange
+
+    sample_hunk = HunkChange(
+        id="1",
+        file_path="file.txt",
+        start_line=1,
+        end_line=1,
+        original_start=1,
+        original_length=1,
+        new_start=1,
+        new_length=1,
+        diff_content="@@ -1 +1 @@\n-one\n+two\n",
+        status=ChangeStatus.UNKNOWN,
+    )
+
+    monkeypatch.setattr(repo, "get_diff", lambda bad, base_commit: "diff --git a/x b/x")
+    monkeypatch.setattr(repo, "_extract_file_header", lambda full, path: None)
+    monkeypatch.setattr(repo, "create_temp_branch", lambda name, commit: None)
+    deleted = {"called": False}
+    monkeypatch.setattr(repo, "delete_branch", lambda name: deleted.__setitem__("called", True))
+
+    assert not repo.apply_hunk_changes([sample_hunk], base, base, use_temp_branch=True)
+    assert deleted["called"]
+
+
+def test_apply_hunk_changes_apply_patch_cleanup_error(
+    monkeypatch: pytest.MonkeyPatch, git_repo: Path
+) -> None:
+    """Cleanup handles checkout failures when patch application fails."""
+    base = create_commit(git_repo, "file.txt", "one\n", "msg")
+    repo = GitRepo(git_repo)
+    from git_bifurcate.models import HunkChange
+
+    sample_hunk = HunkChange(
+        id="1",
+        file_path="file.txt",
+        start_line=1,
+        end_line=1,
+        original_start=1,
+        original_length=1,
+        new_start=1,
+        new_length=1,
+        diff_content="@@ -1 +1 @@\n-one\n+two\n",
+        status=ChangeStatus.UNKNOWN,
+    )
+
+    diff_text = """diff --git a/file.txt b/file.txt
+index 1..2 100644
+--- a/file.txt
++++ b/file.txt
+@@ -1 +1 @@
+-one
++two"""
+
+    monkeypatch.setattr(repo, "get_diff", lambda bad, base_commit: diff_text)
+    monkeypatch.setattr(repo, "apply_patch", lambda patch: False)
+    monkeypatch.setattr(repo, "create_temp_branch", lambda name, commit: None)
+
+    def bad_checkout(*args, **kwargs):
+        raise git.GitCommandError("checkout", 1, "fail")
+
+    monkeypatch.setattr(type(repo.repo.git), "checkout", bad_checkout, raising=False)
+    monkeypatch.setattr(repo, "delete_branch", lambda name: None)
+
+    assert not repo.apply_hunk_changes([sample_hunk], base, base, use_temp_branch=True)
+
+
+def test_apply_hunk_changes_apply_patch_failure(
+    monkeypatch: pytest.MonkeyPatch, git_repo: Path
+) -> None:
+    """Failed patch application cleans up temp branch."""
+    repo = GitRepo(git_repo)
+    base = create_commit(git_repo, "file.txt", "one\n", "msg")
+    from git_bifurcate.models import HunkChange
+
+    sample_hunk = HunkChange(
+        id="1",
+        file_path="file.txt",
+        start_line=1,
+        end_line=1,
+        original_start=1,
+        original_length=1,
+        new_start=1,
+        new_length=1,
+        diff_content="@@ -1 +1 @@\n-one\n+two\n",
+        status=ChangeStatus.UNKNOWN,
+    )
+
+    diff_text = """diff --git a/file.txt b/file.txt
+index 111..222 100644
+--- a/file.txt
++++ b/file.txt
+@@ -1 +1 @@
+-one
++two"""
+
+    monkeypatch.setattr(repo, "get_diff", lambda bad, base_commit: diff_text)
+    monkeypatch.setattr(repo, "apply_patch", lambda patch: False)
+    monkeypatch.setattr(repo, "create_temp_branch", lambda name, commit: None)
+    monkeypatch.setattr(repo, "delete_branch", lambda name: None)
+
+    assert not repo.apply_hunk_changes([sample_hunk], base, base, use_temp_branch=True)
+
+
+def test_apply_hunk_changes_reset_failure_non_temp(
+    monkeypatch: pytest.MonkeyPatch, git_repo: Path
+) -> None:
+    """Reset failures without temp branch return False."""
+    repo = GitRepo(git_repo)
+    create_commit(git_repo, "file.txt", "one\n", "msg")
+    from git_bifurcate.models import HunkChange
+
+    sample_hunk = HunkChange(
+        id="1",
+        file_path="file.txt",
+        start_line=1,
+        end_line=1,
+        original_start=1,
+        original_length=1,
+        new_start=1,
+        new_length=1,
+        diff_content="@@ -1 +1 @@\n-one\n+two\n",
+        status=ChangeStatus.UNKNOWN,
+    )
+
+    def bad_reset(*args, **kwargs):
+        raise GitOperationError("reset")
+
+    monkeypatch.setattr(repo, "reset_hard", bad_reset)
+    assert not repo.apply_hunk_changes([sample_hunk], "HEAD", "HEAD", use_temp_branch=False)
+
+
+def test_extract_file_header_without_hunks() -> None:
+    """If the diff moves to the next file without hunks, None is returned."""
+    repo = GitRepo()
+    diff = """diff --git a/a.txt b/a.txt
+index 1..2 100644
+--- a/a.txt
++++ b/a.txt
+diff --git a/b.txt b/b.txt
+@@ -1 +1 @@
+-x
++y"""
+
+    assert repo._extract_file_header(diff, "a.txt") is None
