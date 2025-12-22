@@ -3,7 +3,6 @@
 set -e
 
 uv run ty check
-uv run mypy src
 
 uv run ruff format
 uv run ruff check --fix --unsafe-fixes
