@@ -383,7 +383,7 @@ class TestComplexScenarios:
 
     def test_empty_graph(self) -> None:
         """Test empty dependency graph."""
-        changes: list[FileChange] = []
+        changes: list[FileChange | HunkChange] = []
 
         graph = DependencyGraph(changes)
         stats = graph.get_stats()
