@@ -2,10 +2,8 @@
 
 from __future__ import annotations
 
-import pytest
-
 from git_bifurcate.dependency_graph import DependencyGraph, build_dependency_graph
-from git_bifurcate.models import ChangeStatus, FileChange, HunkChange
+from git_bifurcate.models import FileChange, HunkChange
 
 
 class TestDependencyGraph:

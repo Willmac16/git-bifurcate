@@ -2,8 +2,6 @@
 
 from __future__ import annotations
 
-import pytest
-
 from git_bifurcate.dependency_analyzer import (
     DependencyAnalyzer,
     apply_dependency_analysis,
@@ -262,7 +260,7 @@ class TestDependencyAnalysisIntegration:
         ]
 
         analyzer = DependencyAnalyzer()
-        deps = analyzer.analyze_file_dependencies(changes)
+        _ = analyzer.analyze_file_dependencies(changes)
 
         # c.py should reference both a.py and b.py
         refs = analyzer.symbol_references.get("c.py", set())
@@ -353,7 +351,6 @@ class TestEdgeCases:
         analyzer._extract_symbols(change2)
 
         defs = analyzer.symbol_definitions.get("original.py", set())
-        refs = analyzer.symbol_references.get("user.py", set())
 
         # Should detect alias
         assert "original_func" in defs
@@ -388,7 +385,6 @@ class TestEdgeCases:
         analyzer._extract_python_symbols(change)
 
         # Should capture the module reference
-        refs = analyzer.symbol_references.get("user.py", set())
         assert "module" in analyzer.symbol_definitions.get("user.py", set())
 
     def test_import_with_asname(self) -> None:

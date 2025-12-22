@@ -8,7 +8,6 @@ from unittest.mock import MagicMock, patch
 import pytest
 
 from git_bifurcate.commit_bisect import CommitBisector, CommitInfo, warm_git_cache
-from git_bifurcate.git_ops import GitRepo
 from git_bifurcate.models import CommandResult
 from git_bifurcate.test_runner import CommandRunner
 
@@ -185,7 +184,7 @@ class TestCommitBisector:
 
         bisector = CommitBisector(mock_git, mock_test_runner)
 
-        with patch("subprocess.run") as mock_run, patch("pathlib.Path.exists", return_value=True):
+        with patch("subprocess.run"), patch("pathlib.Path.exists", return_value=True):
             bisector._update_submodules("abc123", verbose=False)
 
             mock_git.repo.git.submodule.assert_called_once_with(
@@ -235,7 +234,6 @@ class TestCommitBisector:
         self, mock_git: MagicMock, mock_test_runner: MagicMock
     ) -> None:
         """Test bisecting to find single bad commit."""
-        commits = ["commit1"]
         mock_git.repo.git.rev_list.return_value = "commit1"
         mock_git.repo.git.show.return_value = (
             "commit1\ncommit0\nBad commit\nJohn Doe\n1234567890"
@@ -293,7 +291,7 @@ class TestCommitBisector:
         mock_test_runner.run.side_effect = results
 
         bisector = CommitBisector(mock_git, mock_test_runner)
-        result = bisector.bisect_commits("good", "bad", verbose=True)
+        _ = bisector.bisect_commits("good", "bad", verbose=True)
 
         captured = capsys.readouterr()
         assert "Bisecting 3 commits" in captured.out
@@ -315,7 +313,7 @@ class TestCommitBisector:
         mock_test_runner.run.side_effect = results
 
         bisector = CommitBisector(mock_git, mock_test_runner)
-        result = bisector.bisect_commits("good", "bad", verbose=True)
+        _ = bisector.bisect_commits("good", "bad", verbose=True)
 
         captured = capsys.readouterr()
         assert "skipping this commit" in captured.out
@@ -335,7 +333,7 @@ class TestCommitBisector:
         mock_test_runner.run.side_effect = results
 
         bisector = CommitBisector(mock_git, mock_test_runner)
-        result = bisector.bisect_commits("good", "bad", verbose=True)
+        _ = bisector.bisect_commits("good", "bad", verbose=True)
 
         captured = capsys.readouterr()
         assert "PASS" in captured.out
@@ -363,7 +361,7 @@ class TestCommitBisector:
 
         bisector = CommitBisector(mock_git, mock_test_runner)
 
-        with patch("subprocess.run") as mock_run, patch("pathlib.Path.exists", return_value=True):
+        with patch("subprocess.run"), patch("pathlib.Path.exists", return_value=True):
             bisector._update_submodules("abc123", verbose=True)
 
             captured = capsys.readouterr()
