@@ -3,18 +3,23 @@
 from __future__ import annotations
 
 import os
-import runpy
 import subprocess
+import sys
 from pathlib import Path
 from types import SimpleNamespace
-import sys
 
 import pytest
 from click.testing import CliRunner
 
 from git_bifurcate.cli import main
-from git_bifurcate.models import BifurcationState, ChangeStatus, FileChange, HunkChange, Strategy
-from git_bifurcate.models import CommandResult  # type: ignore  # re-export convenience
+from git_bifurcate.models import (
+    BifurcationState,
+    ChangeStatus,
+    CommandResult,  # type: ignore  # re-export convenience
+    FileChange,
+    HunkChange,
+    Strategy,
+)
 
 
 @pytest.fixture
@@ -259,7 +264,9 @@ def test_cli_main_no_subcommand_shows_help(runner: CliRunner) -> None:
     assert "Usage" in result.output
 
 
-def test_cli_start_defaults_and_parent_option(monkeypatch: pytest.MonkeyPatch, runner: CliRunner) -> None:
+def test_cli_start_defaults_and_parent_option(
+    monkeypatch: pytest.MonkeyPatch, runner: CliRunner
+) -> None:
     """Start uses HEAD and explicit parent and exits when no changes exist."""
 
     class FakeGit:
@@ -285,7 +292,9 @@ def test_cli_start_defaults_and_parent_option(monkeypatch: pytest.MonkeyPatch, r
     assert "No changes found" in result.output
 
 
-def test_cli_start_all_changes_should_fail(monkeypatch: pytest.MonkeyPatch, runner: CliRunner) -> None:
+def test_cli_start_all_changes_should_fail(
+    monkeypatch: pytest.MonkeyPatch, runner: CliRunner
+) -> None:
     """If the combined change passes, the CLI aborts early."""
 
     class FakeGit:
@@ -358,7 +367,9 @@ def test_cli_start_parent_should_pass(monkeypatch: pytest.MonkeyPatch, runner: C
     assert "Expected test to PASS" in result.output
 
 
-def test_cli_start_no_breaking_file_found(monkeypatch: pytest.MonkeyPatch, runner: CliRunner) -> None:
+def test_cli_start_no_breaking_file_found(
+    monkeypatch: pytest.MonkeyPatch, runner: CliRunner
+) -> None:
     """When no single breaking file is found, the CLI reports and cleans up."""
 
     class FakeGit:
@@ -395,8 +406,12 @@ def test_cli_start_no_breaking_file_found(monkeypatch: pytest.MonkeyPatch, runne
     file_change = FileChange("0", "file.txt", "modified", "diff", status=ChangeStatus.UNKNOWN)
 
     monkeypatch.setattr(BifurcationState, "exists", classmethod(lambda cls: False))
-    monkeypatch.setattr(BifurcationState, "save", lambda self, filepath=".git/bifurcate-state.json": None)
-    monkeypatch.setattr(BifurcationState, "delete", staticmethod(lambda filepath=".git/bifurcate-state.json": None))
+    monkeypatch.setattr(
+        BifurcationState, "save", lambda self, filepath=".git/bifurcate-state.json": None
+    )
+    monkeypatch.setattr(
+        BifurcationState, "delete", staticmethod(lambda filepath=".git/bifurcate-state.json": None)
+    )
     monkeypatch.setattr("git_bifurcate.cli.GitRepo", FakeGit)
     monkeypatch.setattr("git_bifurcate.cli.parse_file_changes", lambda diff: [file_change])
     monkeypatch.setattr("git_bifurcate.cli.CommandRunner", lambda cmd: None)
@@ -464,7 +479,7 @@ def test_cli_start_hunk_expected_fail(monkeypatch: pytest.MonkeyPatch, runner: C
         original_length=1,
         new_start=1,
         new_length=1,
-        diff_content="@@" ,
+        diff_content="@@",
         status=ChangeStatus.UNKNOWN,
     )
 
@@ -479,7 +494,9 @@ def test_cli_start_hunk_expected_fail(monkeypatch: pytest.MonkeyPatch, runner: C
     assert "Expected test to FAIL" in result.output
 
 
-def test_cli_start_hunk_parent_should_pass(monkeypatch: pytest.MonkeyPatch, runner: CliRunner) -> None:
+def test_cli_start_hunk_parent_should_pass(
+    monkeypatch: pytest.MonkeyPatch, runner: CliRunner
+) -> None:
     """Hunk strategy aborts when parent does not pass."""
 
     class FakeGit:
@@ -512,7 +529,7 @@ def test_cli_start_hunk_parent_should_pass(monkeypatch: pytest.MonkeyPatch, runn
         original_length=1,
         new_start=1,
         new_length=1,
-        diff_content="@@" ,
+        diff_content="@@",
         status=ChangeStatus.UNKNOWN,
     )
 
@@ -527,7 +544,9 @@ def test_cli_start_hunk_parent_should_pass(monkeypatch: pytest.MonkeyPatch, runn
     assert "Expected test to PASS" in result.output
 
 
-def test_cli_start_hunk_no_breaking_change(monkeypatch: pytest.MonkeyPatch, runner: CliRunner) -> None:
+def test_cli_start_hunk_no_breaking_change(
+    monkeypatch: pytest.MonkeyPatch, runner: CliRunner
+) -> None:
     """No single hunk found path is reported and cleaned."""
 
     class FakeGit:
@@ -570,13 +589,17 @@ def test_cli_start_hunk_no_breaking_change(monkeypatch: pytest.MonkeyPatch, runn
         original_length=1,
         new_start=1,
         new_length=1,
-        diff_content="@@" ,
+        diff_content="@@",
         status=ChangeStatus.UNKNOWN,
     )
 
     monkeypatch.setattr(BifurcationState, "exists", classmethod(lambda cls: False))
-    monkeypatch.setattr(BifurcationState, "save", lambda self, filepath=".git/bifurcate-state.json": None)
-    monkeypatch.setattr(BifurcationState, "delete", staticmethod(lambda filepath=".git/bifurcate-state.json": None))
+    monkeypatch.setattr(
+        BifurcationState, "save", lambda self, filepath=".git/bifurcate-state.json": None
+    )
+    monkeypatch.setattr(
+        BifurcationState, "delete", staticmethod(lambda filepath=".git/bifurcate-state.json": None)
+    )
     monkeypatch.setattr("git_bifurcate.cli.GitRepo", FakeGit)
     monkeypatch.setattr("git_bifurcate.cli.parse_hunk_changes", lambda diff: [hunk])
     monkeypatch.setattr("git_bifurcate.cli.CommandRunner", lambda cmd: None)
@@ -670,8 +693,12 @@ def test_cli_start_cleanup_success(monkeypatch: pytest.MonkeyPatch, runner: CliR
         return git_instances.pop(0)
 
     monkeypatch.setattr(BifurcationState, "exists", classmethod(lambda cls: False))
-    monkeypatch.setattr(BifurcationState, "load", classmethod(lambda cls: SimpleNamespace(commit_sha="abc123")))
-    monkeypatch.setattr(BifurcationState, "delete", staticmethod(lambda filepath=".git/bifurcate-state.json": None))
+    monkeypatch.setattr(
+        BifurcationState, "load", classmethod(lambda cls: SimpleNamespace(commit_sha="abc123"))
+    )
+    monkeypatch.setattr(
+        BifurcationState, "delete", staticmethod(lambda filepath=".git/bifurcate-state.json": None)
+    )
     monkeypatch.setattr("git_bifurcate.cli.GitRepo", git_factory)
 
     result = runner.invoke(main, ["start", "--test", "echo"])
@@ -697,7 +724,7 @@ def test_cli_status_lists_breaking(monkeypatch: pytest.MonkeyPatch, runner: CliR
                 original_length=1,
                 new_start=1,
                 new_length=1,
-                diff_content="@@" ,
+                diff_content="@@",
                 status=ChangeStatus.UNKNOWN,
             ),
             FileChange("1", "another.txt", "modified", "diff", status=ChangeStatus.UNKNOWN),
@@ -720,7 +747,9 @@ def test_cli_status_lists_breaking(monkeypatch: pytest.MonkeyPatch, runner: CliR
 def test_cli_status_load_error(monkeypatch: pytest.MonkeyPatch, runner: CliRunner) -> None:
     """Status handles load errors by exiting."""
     monkeypatch.setattr(BifurcationState, "exists", classmethod(lambda cls: True))
-    monkeypatch.setattr(BifurcationState, "load", classmethod(lambda cls: (_ for _ in ()).throw(ValueError("bad"))))
+    monkeypatch.setattr(
+        BifurcationState, "load", classmethod(lambda cls: (_ for _ in ()).throw(ValueError("bad")))
+    )
 
     result = runner.invoke(main, ["status"])
     assert result.exit_code == 1
@@ -730,7 +759,11 @@ def test_cli_status_load_error(monkeypatch: pytest.MonkeyPatch, runner: CliRunne
 def test_cli_reset_missing_state(monkeypatch: pytest.MonkeyPatch, runner: CliRunner) -> None:
     """Reset handles missing state with and without force."""
     monkeypatch.setattr(BifurcationState, "exists", classmethod(lambda cls: True))
-    monkeypatch.setattr(BifurcationState, "load", classmethod(lambda cls: (_ for _ in ()).throw(FileNotFoundError())))
+    monkeypatch.setattr(
+        BifurcationState,
+        "load",
+        classmethod(lambda cls: (_ for _ in ()).throw(FileNotFoundError())),
+    )
 
     result = runner.invoke(main, ["reset"])
     assert result.exit_code == 1
