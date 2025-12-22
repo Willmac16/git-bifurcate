@@ -942,6 +942,8 @@ def test_apply_changes_nested_patch_failure(
 
 def test_get_parent_commit_merge_commit(git_repo: Path) -> None:
     """Ensure merge commits raise an error when asking for a single parent."""
+    subprocess.run(["git", "checkout", "-b", "main"], cwd=git_repo, check=True, capture_output=True)
+
     base = create_commit(git_repo, "base.txt", "base", "base")
 
     subprocess.run(
@@ -950,7 +952,7 @@ def test_get_parent_commit_merge_commit(git_repo: Path) -> None:
     create_commit(git_repo, "feature.txt", "feature", "feature change")
 
     subprocess.run(["git", "checkout", "main"], cwd=git_repo, check=True, capture_output=True)
-    _master_change = create_commit(git_repo, "master.txt", "master", "master change")
+    _main_change = create_commit(git_repo, "main.txt", "main", "main change")
 
     subprocess.run(
         ["git", "merge", "--no-ff", "feature", "-m", "Merge feature"],
