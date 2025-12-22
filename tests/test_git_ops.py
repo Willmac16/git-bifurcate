@@ -949,7 +949,7 @@ def test_get_parent_commit_merge_commit(git_repo: Path) -> None:
     )
     create_commit(git_repo, "feature.txt", "feature", "feature change")
 
-    subprocess.run(["git", "checkout", "master"], cwd=git_repo, check=True, capture_output=True)
+    subprocess.run(["git", "checkout", "main"], cwd=git_repo, check=True, capture_output=True)
     _master_change = create_commit(git_repo, "master.txt", "master", "master change")
 
     subprocess.run(
