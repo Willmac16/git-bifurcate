@@ -8,7 +8,7 @@ from __future__ import annotations
 import pytest
 
 from git_bifurcate.dependency_analyzer import DependencyAnalyzer
-from git_bifurcate.models import ChangeStatus, FileChange
+from git_bifurcate.models import ChangeStatus, FileChange, HunkChange
 
 
 class TestCppDependencies:
@@ -725,3 +725,242 @@ class TestCrosslanguageDependencies:
                 | analyzer.symbol_references.get(file_path, set())
             )
             assert expected_symbol in symbols, f"Failed for {file_path}: expected {expected_symbol}"
+
+    def test_cpp_template_definition(self) -> None:
+        """Test C++ template class/struct definitions."""
+        change = FileChange(
+            "0",
+            "template.h",
+            "added",
+            "+template <typename T>\n+class Container {\n+    T value;\n+};",
+            ChangeStatus.UNKNOWN,
+        )
+
+        analyzer = DependencyAnalyzer()
+        analyzer._extract_cpp_symbols(change)
+
+        defs = analyzer.symbol_definitions.get("template.h", set())
+        assert "Container" in defs
+
+    def test_go_var_definition(self) -> None:
+        """Test Go variable definitions."""
+        change = FileChange(
+            "0",
+            "vars.go",
+            "added",
+            "+var GlobalVar = 42\n+var AnotherVar string",
+            ChangeStatus.UNKNOWN,
+        )
+
+        analyzer = DependencyAnalyzer()
+        analyzer._extract_go_symbols(change)
+
+        defs = analyzer.symbol_definitions.get("vars.go", set())
+        assert "GlobalVar" in defs or "AnotherVar" in defs
+
+    def test_swift_protocol_definition(self) -> None:
+        """Test Swift protocol definitions."""
+        change = FileChange(
+            "0",
+            "protocol.swift",
+            "added",
+            "+protocol MyProtocol {\n+    func doSomething()\n+}",
+            ChangeStatus.UNKNOWN,
+        )
+
+        analyzer = DependencyAnalyzer()
+        analyzer._extract_swift_symbols(change)
+
+        defs = analyzer.symbol_definitions.get("protocol.swift", set())
+        assert "MyProtocol" in defs
+
+    def test_zig_pub_fn_definition(self) -> None:
+        """Test Zig public function definitions."""
+        change = FileChange(
+            "0",
+            "module.zig",
+            "added",
+            "+pub fn publicFunction() void {\n+    return;\n+}",
+            ChangeStatus.UNKNOWN,
+        )
+
+        analyzer = DependencyAnalyzer()
+        analyzer._extract_zig_symbols(change)
+
+        defs = analyzer.symbol_definitions.get("module.zig", set())
+        assert "publicFunction" in defs
+
+    def test_verilog_module_definition(self) -> None:
+        """Test Verilog module definitions."""
+        change = FileChange(
+            "0",
+            "design.v",
+            "added",
+            "+module counter(\n+    input clk,\n+    output [7:0] count\n+);",
+            ChangeStatus.UNKNOWN,
+        )
+
+        analyzer = DependencyAnalyzer()
+        analyzer._extract_verilog_symbols(change)
+
+        defs = analyzer.symbol_definitions.get("design.v", set())
+        assert "counter" in defs
+
+    def test_hunk_import_analysis(self) -> None:
+        """Test hunk-level Python import analysis."""
+        hunk = HunkChange(
+            "0",
+            "module.py",
+            1,
+            10,
+            1,
+            3,
+            1,
+            10,
+            "+import numpy as np\n+from typing import List\n+x = np.array([1,2,3])",
+            ChangeStatus.UNKNOWN,
+        )
+
+        analyzer = DependencyAnalyzer()
+        defs, refs = analyzer._extract_hunk_symbols(hunk)
+
+        # Should capture import with asname
+        assert "np" in defs or "List" in refs
+
+    def test_hunk_syntax_error_fallback(self) -> None:
+        """Test hunk analysis falls back to regex on syntax error."""
+        hunk = HunkChange(
+            "0",
+            "broken.py",
+            1,
+            5,
+            1,
+            2,
+            1,
+            5,
+            "+def incomplete(\n+    # syntax error",
+            ChangeStatus.UNKNOWN,
+        )
+
+        analyzer = DependencyAnalyzer()
+        defs, refs = analyzer._extract_hunk_symbols(hunk)
+
+        # Should use fallback regex
+        assert "incomplete" in defs
+
+    def test_hunk_non_python_generic(self) -> None:
+        """Test hunk analysis for non-Python files."""
+        hunk = HunkChange(
+            "0",
+            "module.js",
+            1,
+            5,
+            1,
+            2,
+            1,
+            5,
+            "+function myFunc() {\n+    return 42;\n+}",
+            ChangeStatus.UNKNOWN,
+        )
+
+        analyzer = DependencyAnalyzer()
+        defs, refs = analyzer._extract_hunk_symbols(hunk)
+
+        # Should use generic extraction
+        assert "myFunc" in defs
+
+    def test_generic_extraction_import_pattern(self) -> None:
+        """Test generic import pattern extraction."""
+        change = FileChange(
+            "0",
+            "module.unknown",
+            "added",
+            "+import somemodule\n+from another import thing",
+            ChangeStatus.UNKNOWN,
+        )
+
+        analyzer = DependencyAnalyzer()
+        analyzer._extract_generic_symbols(change)
+
+        defs = analyzer.symbol_definitions.get("module.unknown", set())
+        # Should capture import modules
+        assert "somemodule" in defs or "another" in defs
+
+    def test_contextual_hunk_dependencies(self) -> None:
+        """Test detecting contextual dependencies between hunks."""
+        hunks = [
+            HunkChange("0", "f.py", 1, 5, 1, 3, 1, 5, "+def helper():\n+    pass"),
+            HunkChange("1", "f.py", 10, 15, 10, 2, 10, 5, "+result = helper()"),
+        ]
+
+        analyzer = DependencyAnalyzer()
+        deps = analyzer.detect_contextual_dependencies(hunks)
+
+        # Should return a dict with all hunk ids
+        assert "0" in deps
+        assert "1" in deps
+        assert isinstance(deps, dict)
+
+    def test_cpp_template_class(self) -> None:
+        """Test C++ template class definitions."""
+        change = FileChange(
+            "0",
+            "template.h",
+            "added",
+            "+template <typename T> class MyTemplate { T value; };",
+            ChangeStatus.UNKNOWN,
+        )
+
+        analyzer = DependencyAnalyzer()
+        analyzer._extract_cpp_symbols(change)
+
+        defs = analyzer.symbol_definitions.get("template.h", set())
+        assert "MyTemplate" in defs
+
+    def test_swift_typealias(self) -> None:
+        """Test Swift typealias definitions."""
+        change = FileChange(
+            "0",
+            "types.swift",
+            "added",
+            "+typealias StringDictionary = [String: String]\n+typealias Callback = () -> Void",
+            ChangeStatus.UNKNOWN,
+        )
+
+        analyzer = DependencyAnalyzer()
+        analyzer._extract_swift_symbols(change)
+
+        defs = analyzer.symbol_definitions.get("types.swift", set())
+        assert "StringDictionary" in defs or "Callback" in defs
+
+    def test_zig_type_definition(self) -> None:
+        """Test Zig type definitions."""
+        change = FileChange(
+            "0",
+            "types.zig",
+            "added",
+            "+const MyType = type;\n+pub const PublicType = type;",
+            ChangeStatus.UNKNOWN,
+        )
+
+        analyzer = DependencyAnalyzer()
+        analyzer._extract_zig_symbols(change)
+
+        defs = analyzer.symbol_definitions.get("types.zig", set())
+        assert "MyType" in defs or "PublicType" in defs
+
+    def test_contextual_dependencies_reverse_order(self) -> None:
+        """Test contextual dependencies when later hunk starts earlier in file."""
+        hunks = [
+            HunkChange("0", "f.py", 1, 5, 5, 2, 5, 5, "+result = helper()"),  # Starts at line 5 in new file
+            HunkChange("1", "f.py", 10, 15, 1, 3, 1, 5, "+def helper():\n+    pass"),  # Starts at line 1 in new file
+        ]
+
+        analyzer = DependencyAnalyzer()
+        deps = analyzer.detect_contextual_dependencies(hunks)
+
+        # Should detect dependency - hunks are within 5 lines and hunk 1 starts earlier
+        assert "0" in deps
+        assert "1" in deps
+        # Hunk 0 should depend on hunk 1 since hunk 1 starts earlier (line 1 vs line 5)
+        assert "1" in deps["0"]

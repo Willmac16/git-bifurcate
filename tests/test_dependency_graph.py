@@ -406,3 +406,45 @@ class TestComplexScenarios:
         assert graph.get_leaf_changes() == [0]
         assert graph.get_all_dependencies("0") == set()
         assert graph.has_cycle() is False
+
+    def test_dependency_on_nonexistent_change(self) -> None:
+        """Test handling of dependencies on non-existent changes."""
+        changes = [
+            FileChange("0", "a.py", "added", "diff0", dependencies=[]),
+            FileChange("1", "b.py", "added", "diff1", dependencies=["0", "999"]),
+        ]
+
+        graph = DependencyGraph(changes)
+
+        # Should handle non-existent dependency gracefully
+        assert "0" in graph.graph["1"]
+        # Non-existent dependency might be in graph or filtered out
+        deps = graph.get_all_dependencies("1")
+        assert "0" in deps
+
+    def test_get_all_dependents_with_multiple_paths(self) -> None:
+        """Test get_all_dependents with multiple paths to same node."""
+        changes = [
+            FileChange("0", "a.py", "added", "diff0", dependencies=[]),
+            FileChange("1", "b.py", "added", "diff1", dependencies=["0"]),
+            FileChange("2", "c.py", "added", "diff2", dependencies=["0"]),
+            FileChange("3", "d.py", "added", "diff3", dependencies=["1", "2"]),
+        ]
+
+        graph = DependencyGraph(changes)
+
+        # 0 is depended on by 1, 2, and transitively by 3
+        dependents = graph.get_all_dependents("0")
+        assert dependents == {"1", "2", "3"}
+
+    def test_get_dependency_depth_nonexistent(self) -> None:
+        """Test dependency depth for non-existent change."""
+        changes = [
+            FileChange("0", "a.py", "added", "diff0", dependencies=[]),
+        ]
+
+        graph = DependencyGraph(changes)
+
+        # Non-existent change should have depth 0
+        depth = graph.get_dependency_depth("999")
+        assert depth == 0
