@@ -23,9 +23,14 @@ Thank you for considering contributing to git-bifurcate! This document provides 
    uv sync --all-extras --dev
    ```
 
-3. **Run tests to verify setup**
+3. **(Optional) Install pre-commit hooks**
    ```bash
-   uv run pytest
+   uv run pre-commit install
+   ```
+
+4. **Run tests to verify setup**
+   ```bash
+   ./test --test-only
    ```
 
 ## Development Workflow
@@ -46,17 +51,14 @@ Thank you for considering contributing to git-bifurcate! This document provides 
 
 3. **Run quality checks**
    ```bash
-   # Run all tests
-   uv run pytest
+   # Full CI-equivalent suite
+   ./test
 
-   # Run linter
-   uv run ruff check src tests
+   # Linting and type checks only
+   ./test --lint-only
 
-   # Format code
-   uv run ruff format src tests
-
-   # Type check
-   uv run mypy src
+   # Tests with coverage only
+   ./test --test-only
    ```
 
 4. **Commit your changes**
@@ -150,17 +152,20 @@ def test_bifurcate_finds_breaking_change(git_repo: Path) -> None:
 ### Running Tests
 
 ```bash
-# Run all tests
-uv run pytest
+# Full CI-equivalent suite (lint, type check, tests with coverage)
+./test
+
+# Linting and type checks only
+./test --lint-only
+
+# Test suite only (with coverage reports)
+./test --test-only
 
 # Run specific test file
 uv run pytest tests/test_core.py
 
 # Run specific test
 uv run pytest tests/test_core.py::test_bifurcate_finds_breaking_change
-
-# Run with coverage
-uv run pytest --cov=git_bifurcate --cov-report=html
 
 # Run verbose
 uv run pytest -v

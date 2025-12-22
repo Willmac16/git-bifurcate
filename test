@@ -1,13 +1,49 @@
-#! /bin/env bash
+#!/usr/bin/env bash
 
-set -e
+set -euo pipefail
 
-uv run ty check
+usage() {
+  cat <<'EOF'
+usage: ./test [--lint-only|--test-only|--help]
 
-uv run ruff format
-uv run ruff check --fix --unsafe-fixes
+Runs the same linting, type checking, and test suite as CI.
 
-uv build
+  --lint-only  Run formatting checks, linting, and type checks without tests.
+  --test-only  Run the test suite (with coverage) without linting/type checks.
+  --help       Show this message and exit.
+EOF
+}
 
-pytest
+run_lint=true
+run_tests=true
 
+while [[ $# -gt 0 ]]; do
+  case "$1" in
+    --lint-only)
+      run_tests=false
+      ;;
+    --test-only)
+      run_lint=false
+      ;;
+    --help|-h)
+      usage
+      exit 0
+      ;;
+    *)
+      echo "Unknown option: $1" >&2
+      usage
+      exit 1
+      ;;
+  esac
+  shift
+done
+
+if $run_lint; then
+  uv run ruff format --check src tests
+  uv run ruff check src tests
+  uv run ty check src
+fi
+
+if $run_tests; then
+  uv run pytest --cov=git_bifurcate --cov-report=xml --cov-report=term-missing --cov-report=html
+fi

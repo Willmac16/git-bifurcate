@@ -17,7 +17,7 @@ GitHub Actions workflows and repository configuration have been created. This do
    - Runs on: Push to main/master/claude/* branches, pull requests
    - Ruff linter checks
    - Ruff formatter verification
-   - Mypy type checking (non-blocking)
+   - Ty type checking (non-blocking)
 
 3. **build.yml** - Build & Installation Testing
    - Runs on: Push to main/master, pull requests, version tags
@@ -153,20 +153,17 @@ Add these to your README.md (already added):
 Run the same checks locally before pushing:
 
 ```bash
-# Run tests with coverage
-uv run pytest
+# Run tests with coverage (HTML + XML) – matches test workflow
+./test --test-only
 
-# Run linter
-uv run ruff check src tests
+# Run formatting, linting, and type checks – matches lint workflow
+./test --lint-only
+```
 
-# Format code
-uv run ruff format src tests
+Optional: enable local git hooks to run the same checks automatically before each commit:
 
-# Type check
-uv run mypy src
-
-# Build package
-uv build
+```bash
+uv run pre-commit install
 ```
 
 ## Next Steps

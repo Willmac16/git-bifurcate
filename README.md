@@ -168,6 +168,30 @@ Applied changes [1-6] of 12
 # Continue...
 ```
 
+## Development
+
+Run the same checks locally that CI executes:
+
+```bash
+# Linting and type checking
+./test --lint-only
+
+# Test suite with coverage (includes HTML and XML reports)
+./test --test-only
+```
+
+Or run everything together:
+
+```bash
+./test
+```
+
+Optional: install pre-commit hooks to run these checks automatically before each commit:
+
+```bash
+uv run pre-commit install
+```
+
 ## Command Reference
 
 ### `git bifurcate start <commit> [options]`
