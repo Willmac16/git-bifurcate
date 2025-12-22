@@ -17,12 +17,16 @@ def run_git(cmd: list[str], cwd: Path) -> None:
     subprocess.run(["git"] + cmd, cwd=cwd, check=True, capture_output=True)
 
 
+DEFAULT_BRANCH = "trunk"
+
+
 def repo_init(repo_path: Path) -> None:
     run_git(["init"], repo_path)
     run_git(["config", "user.name", "Test User"], repo_path)
     run_git(["config", "user.email", "test@example.com"], repo_path)
     run_git(["config", "commit.gpgsign", "false"], repo_path)
-    run_git(["config", "init.defaultBranch", "main"], repo_path)
+    run_git(["config", "init.defaultBranch", DEFAULT_BRANCH], repo_path)
+    run_git(["branch", "-m", DEFAULT_BRANCH], repo_path)
 
 
 def setup_simple_file_fixture(fixtures_dir: Path) -> None:
