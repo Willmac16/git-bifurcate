@@ -4,7 +4,7 @@ version = "0.1.0"
 description = "Find the exact change that broke your tests - extends git bisect to file and hunk level"
 readme = "README.md"
 authors = [
-    { name = "Will MacCormack", email = "will.maccormack@fireflyspace.com" }
+    { name = "Will MacCormack", email = "me@willmac.xyz" }
 ]
 requires-python = ">=3.12"
 dependencies = [
