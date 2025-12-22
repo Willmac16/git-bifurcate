@@ -8,7 +8,7 @@ import pytest
 
 from git_bifurcate.core import BifurcationEngine
 from git_bifurcate.git_ops import GitRepo
-from git_bifurcate.models import ChangeStatus, CommandResult, FileChange
+from git_bifurcate.models import ChangeStatus, CommandResult, FileChange, HunkChange
 from git_bifurcate.test_runner import CommandRunner
 
 
@@ -117,6 +117,21 @@ def test_test_changes_test_execution(
     # Verify test was run
     mock_test_runner.run.assert_called_once()
     assert result == CommandResult.FAIL
+
+
+def test_test_changes_checkout_failure(
+    mock_git: MagicMock, mock_test_runner: MagicMock, sample_changes: list[FileChange]
+) -> None:
+    """Checkout errors are swallowed after running tests."""
+    engine = BifurcationEngine(mock_git, mock_test_runner)
+
+    mock_git.apply_changes.return_value = True
+    mock_test_runner.run.return_value = CommandResult.PASS
+    mock_git.checkout.side_effect = RuntimeError("boom")
+
+    result = engine._test_changes(sample_changes, "base", [0])
+    assert result == CommandResult.PASS
+    mock_git.checkout.assert_called_once_with("base")
 
 
 def test_bifurcate_files_single_breaking_change(
@@ -501,6 +516,33 @@ def test_bifurcate_files_dependency_warning(
     assert "Too many build failures" in captured.out or "dependency" in captured.out.lower()
 
 
+def test_bifurcate_files_upper_half_pass_warning(
+    mock_git: MagicMock, mock_test_runner: MagicMock, capsys: pytest.CaptureFixture[str]
+) -> None:
+    """When lower half fails but upper half passes, a warning is emitted."""
+    changes = [
+        FileChange("0", "file1.py", "modified", "diff1", ChangeStatus.UNKNOWN),
+        FileChange("1", "file2.py", "modified", "diff2", ChangeStatus.UNKNOWN),
+        FileChange("2", "file3.py", "modified", "diff3", ChangeStatus.UNKNOWN),
+        FileChange("3", "file4.py", "modified", "diff4", ChangeStatus.UNKNOWN),
+    ]
+
+    engine = BifurcationEngine(mock_git, mock_test_runner)
+
+    def mock_apply(applied_changes: list[FileChange], *_: object, **__: object) -> bool:
+        ids = {c.id for c in applied_changes}
+        return ids != {"0", "1"}
+
+    mock_git.apply_changes.side_effect = mock_apply
+    mock_test_runner.run.return_value = CommandResult.PASS
+
+    result = engine.bifurcate_files(changes, "base", verbose=True)
+
+    assert result is None
+    captured = capsys.readouterr()
+    assert "Upper half" in captured.out or "Warning: Lower half won't build" in captured.out
+
+
 def test_bifurcate_files_interaction_warning(
     mock_git: MagicMock, mock_test_runner: MagicMock, capsys: pytest.CaptureFixture[str]
 ) -> None:
@@ -574,3 +616,186 @@ def test_bifurcate_hunks_dependency_error(
     # Check error message
     captured = capsys.readouterr()
     assert "build failures" in captured.out.lower() or "dependency" in captured.out.lower()
+
+
+def test_bifurcate_hunks_upper_half_pass_warning(
+    mock_git: MagicMock, mock_test_runner: MagicMock, capsys: pytest.CaptureFixture[str]
+) -> None:
+    """When lower hunks fail but upper hunks pass, dependency warning is printed."""
+    from git_bifurcate.models import HunkChange
+
+    hunks = [
+        HunkChange("0", "file.py", 1, 1, 1, 1, 1, 1, "@@", ChangeStatus.UNKNOWN),
+        HunkChange("1", "file.py", 2, 2, 2, 1, 2, 1, "@@", ChangeStatus.UNKNOWN),
+        HunkChange("2", "file.py", 3, 3, 3, 1, 3, 1, "@@", ChangeStatus.UNKNOWN),
+        HunkChange("3", "file.py", 4, 4, 4, 1, 4, 1, "@@", ChangeStatus.UNKNOWN),
+    ]
+
+    engine = BifurcationEngine(mock_git, mock_test_runner)
+
+    def apply_hunks(selected: list[HunkChange], *_: object, **__: object) -> bool:
+        ids = {h.id for h in selected}
+        return ids != {"0", "1"}
+
+    mock_git.apply_hunk_changes.side_effect = apply_hunks
+    mock_test_runner.run.return_value = CommandResult.PASS
+
+    result = engine.bifurcate_hunks(hunks, "base", "bad", verbose=True)
+
+    assert result is None
+    captured = capsys.readouterr()
+    assert "Warning: Lower half won't build" in captured.out
+
+
+def test_bifurcate_hunks_upper_half_fail_path(
+    mock_git: MagicMock, mock_test_runner: MagicMock
+) -> None:
+    """Upper-half failure path is used when lower half cannot be applied."""
+    from git_bifurcate.models import HunkChange
+
+    hunks = [
+        HunkChange("0", "file.py", 1, 1, 1, 1, 1, 1, "@@", ChangeStatus.UNKNOWN),
+        HunkChange("1", "file.py", 2, 2, 2, 1, 2, 1, "@@", ChangeStatus.UNKNOWN),
+        HunkChange("2", "file.py", 3, 3, 3, 1, 3, 1, "@@", ChangeStatus.UNKNOWN),
+    ]
+
+    def apply(selected: list[HunkChange], *_: object, **__: object) -> bool:
+        ids = {h.id for h in selected}
+        return ids != {"0"}
+
+    def run() -> CommandResult:
+        call_args = mock_git.apply_hunk_changes.call_args
+        applied = call_args[0][0]
+        return CommandResult.FAIL if any(h.id == "1" for h in applied) else CommandResult.PASS
+
+    mock_git.apply_hunk_changes.side_effect = apply
+    mock_test_runner.run.side_effect = run
+
+    engine = BifurcationEngine(mock_git, mock_test_runner)
+    result = engine.bifurcate_hunks(hunks, "base", "bad", verbose=False)
+
+    assert result is not None
+    assert result.id == "1"
+
+
+def test_test_hunk_changes_checkout_failure(
+    mock_git: MagicMock, mock_test_runner: MagicMock
+) -> None:
+    """Checkout errors after hunk testing are ignored."""
+    from git_bifurcate.models import HunkChange
+
+    engine = BifurcationEngine(mock_git, mock_test_runner)
+    hunk = HunkChange("0", "file.py", 1, 1, 1, 1, 1, 1, "@@", ChangeStatus.UNKNOWN)
+    mock_git.apply_hunk_changes.return_value = True
+    mock_test_runner.run.return_value = CommandResult.PASS
+    mock_git.checkout.side_effect = RuntimeError("fail")
+
+    result = engine._test_hunk_changes([hunk], "base", "bad", [0])
+    assert result == CommandResult.PASS
+    mock_git.checkout.assert_called_once_with("base")
+
+
+def test_find_interaction_failure_files(mock_git: MagicMock, mock_test_runner: MagicMock) -> None:
+    """_find_interaction_failure returns minimal combo for file changes."""
+    changes = [
+        FileChange("0", "f1", "modified", "d1", ChangeStatus.UNKNOWN),
+        FileChange("1", "f2", "modified", "d2", ChangeStatus.UNKNOWN),
+    ]
+    engine = BifurcationEngine(mock_git, mock_test_runner)
+
+    def test_func(applied: list[FileChange], *_: object, **__: object) -> CommandResult:
+        ids = {c.id for c in applied}
+        return CommandResult.FAIL if ids == {"0", "1"} else CommandResult.PASS
+
+    mock_git.apply_changes.side_effect = lambda applied, *_args, **_kwargs: True
+    mock_test_runner.run.side_effect = lambda: test_func(mock_git.apply_changes.call_args[0][0])
+
+    combo = engine._find_interaction_failure(changes, "base", None, max_combinations=10)
+    assert combo == [0, 1]
+    assert engine.interaction_failure == [0, 1]
+
+
+def test_find_interaction_failure_hunks(mock_git: MagicMock, mock_test_runner: MagicMock) -> None:
+    """_find_interaction_failure exercises hunk testing branch."""
+    from git_bifurcate.models import HunkChange
+
+    hunks = [
+        HunkChange("0", "f.py", 1, 1, 1, 1, 1, 1, "@@", ChangeStatus.UNKNOWN),
+        HunkChange("1", "f.py", 2, 2, 2, 1, 2, 1, "@@", ChangeStatus.UNKNOWN),
+    ]
+    engine = BifurcationEngine(mock_git, mock_test_runner)
+
+    def hunk_result(selected: list[HunkChange]) -> CommandResult:
+        ids = {h.id for h in selected}
+        return CommandResult.FAIL if ids == {"0", "1"} else CommandResult.PASS
+
+    mock_git.apply_hunk_changes.side_effect = (
+        lambda selected, *_args, **_kwargs: hunk_result(selected) != CommandResult.SKIP
+    )
+    mock_test_runner.run.side_effect = lambda: hunk_result(
+        mock_git.apply_hunk_changes.call_args[0][0]
+    )
+
+    combo = engine._find_interaction_failure(hunks, "base", "bad", max_combinations=10)
+    assert combo == [0, 1]
+    assert engine.interaction_failure == [0, 1]
+
+
+def test_find_interaction_failure_respects_limit(
+    mock_git: MagicMock, mock_test_runner: MagicMock
+) -> None:
+    """Max combination budget returns None early."""
+    changes = [
+        FileChange("0", "f1", "modified", "d1", ChangeStatus.UNKNOWN),
+        FileChange("1", "f2", "modified", "d2", ChangeStatus.UNKNOWN),
+        FileChange("2", "f3", "modified", "d3", ChangeStatus.UNKNOWN),
+    ]
+    engine = BifurcationEngine(mock_git, mock_test_runner)
+
+    mock_git.apply_changes.return_value = True
+    mock_test_runner.run.return_value = CommandResult.PASS
+
+    combo = engine._find_interaction_failure(changes, "base", None, max_combinations=0)
+    assert combo is None
+    assert engine.interaction_failure is None
+
+
+def test_report_interaction_outputs(monkeypatch: pytest.MonkeyPatch) -> None:
+    """_report_interaction prints identified failing combos and handles no results."""
+    engine = BifurcationEngine(MagicMock(spec=GitRepo), MagicMock(spec=CommandRunner))
+    file_changes = [
+        FileChange("0", "f1", "modified", "d1", ChangeStatus.UNKNOWN),
+        FileChange("1", "f2", "modified", "d2", ChangeStatus.UNKNOWN),
+    ]
+    hunk_changes = [
+        HunkChange("0", "f.py", 1, 1, 1, 1, 1, 1, "@@", ChangeStatus.UNKNOWN),
+        HunkChange("1", "f.py", 2, 2, 2, 1, 2, 1, "@@", ChangeStatus.UNKNOWN),
+    ]
+
+    # Case: interaction found
+    monkeypatch.setattr(
+        engine,
+        "_find_interaction_failure",
+        lambda *args, **kwargs: engine.__setattr__("interaction_failure", [0, 1]) or [0, 1],
+    )
+    with patch("click.echo") as echo:
+        engine._report_interaction(file_changes, "base", verbose=True)
+        assert engine.interaction_failure == [0, 1]
+        assert any("f1" in call.args[0] or "f2" in call.args[0] for call in echo.call_args_list)
+
+    # Case: no interaction found
+    monkeypatch.setattr(engine, "_find_interaction_failure", lambda *args, **kwargs: None)
+    with patch("click.echo") as echo:
+        engine._report_interaction(file_changes, "base", verbose=True)
+        assert engine.interaction_failure is None
+        assert any("No minimal failing combination" in call.args[0] for call in echo.call_args_list)
+
+    # Case: hunk combo prints hunk-specific details
+    monkeypatch.setattr(
+        engine,
+        "_find_interaction_failure",
+        lambda *args, **kwargs: engine.__setattr__("interaction_failure", [0]) or [0],
+    )
+    with patch("click.echo") as echo:
+        engine._report_interaction(hunk_changes, "base", verbose=True, bad_commit="bad")
+        assert any("f.py" in call.args[0] for call in echo.call_args_list)
