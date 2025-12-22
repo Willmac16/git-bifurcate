@@ -566,6 +566,7 @@ def test_apply_changes_submodule(git_repo: Path, temp_dir: Path) -> None:
     subprocess.run(["git", "init"], cwd=sub_repo, check=True, capture_output=True)
     subprocess.run(["git", "config", "user.name", "Test User"], cwd=sub_repo, check=True)
     subprocess.run(["git", "config", "user.email", "test@example.com"], cwd=sub_repo, check=True)
+    subprocess.run(["git", "config", "commit.gpgsign", "false"], cwd=sub_repo, check=True)
 
     # Initial commit
     (sub_repo / "dep.txt").write_text("v1\n")
@@ -602,6 +603,9 @@ def test_apply_changes_submodule(git_repo: Path, temp_dir: Path) -> None:
     )
     subprocess.run(
         ["git", "-C", str(submodule_clone), "config", "user.email", "test@example.com"], check=True
+    )
+    subprocess.run(
+        ["git", "-C", str(submodule_clone), "config", "commit.gpgsign", "false"], check=True
     )
 
     (submodule_clone / "dep.txt").write_text("v2\n")
