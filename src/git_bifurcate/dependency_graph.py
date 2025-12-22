@@ -11,13 +11,10 @@ from typing import TypeVar
 
 from git_bifurcate.models import FileChange, HunkChange
 
-T = TypeVar("T", FileChange, HunkChange)
-
-
 class DependencyGraph:
     """Represents a dependency graph for changes."""
 
-    def __init__(self, changes: list[T]) -> None:
+    def __init__(self, changes: list[FileChange | HunkChange]) -> None:
         """Initialize dependency graph.
 
         Args:
@@ -295,7 +292,7 @@ class DependencyGraph:
         }
 
 
-def build_dependency_graph[T: (FileChange, HunkChange)](changes: list[T]) -> DependencyGraph:
+def build_dependency_graph(changes: list[FileChange | HunkChange]) -> DependencyGraph:
     """Build a dependency graph from a list of changes.
 
     Args:

@@ -825,6 +825,7 @@ def test_find_interaction_failure_forward_dependency(
 
     combo = engine._find_interaction_failure(changes, "base", None, max_combinations=10)
     # Should find the forward dependency pair
+    assert combo is not None
     assert set(combo) == {0, 1}
     assert engine.interaction_failure == combo
 
