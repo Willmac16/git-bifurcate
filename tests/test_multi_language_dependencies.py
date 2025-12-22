@@ -554,7 +554,7 @@ class TestZigDependencies:
             "0",
             "config.zig",
             "added",
-            "+pub const VERSION = \"1.0.0\";",
+            '+pub const VERSION = "1.0.0";',
             ChangeStatus.UNKNOWN,
         )
 
@@ -718,10 +718,9 @@ class TestCrosslanguageDependencies:
             change = FileChange("0", file_path, "added", diff, ChangeStatus.UNKNOWN)
             analyzer._extract_symbols(change)
 
-            symbols = (
-                analyzer.symbol_definitions.get(file_path, set())
-                | analyzer.symbol_references.get(file_path, set())
-            )
+            symbols = analyzer.symbol_definitions.get(
+                file_path, set()
+            ) | analyzer.symbol_references.get(file_path, set())
             assert expected_symbol in symbols, f"Failed for {file_path}: expected {expected_symbol}"
 
     def test_cpp_template_definition(self) -> None:
@@ -950,8 +949,12 @@ class TestCrosslanguageDependencies:
     def test_contextual_dependencies_reverse_order(self) -> None:
         """Test contextual dependencies when later hunk starts earlier in file."""
         hunks = [
-            HunkChange("0", "f.py", 1, 5, 5, 2, 5, 5, "+result = helper()"),  # Starts at line 5 in new file
-            HunkChange("1", "f.py", 10, 15, 1, 3, 1, 5, "+def helper():\n+    pass"),  # Starts at line 1 in new file
+            HunkChange(
+                "0", "f.py", 1, 5, 5, 2, 5, 5, "+result = helper()"
+            ),  # Starts at line 5 in new file
+            HunkChange(
+                "1", "f.py", 10, 15, 1, 3, 1, 5, "+def helper():\n+    pass"
+            ),  # Starts at line 1 in new file
         ]
 
         analyzer = DependencyAnalyzer()

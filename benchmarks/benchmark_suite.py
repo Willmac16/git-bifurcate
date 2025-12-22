@@ -92,9 +92,7 @@ class BenchmarkRunner:
         print("-" * 80)
 
         for result in self.results:
-            print(
-                f"{result.name:<50} {result.duration_ms:>11.2f} {result.ops_per_sec:>11.0f}"
-            )
+            print(f"{result.name:<50} {result.duration_ms:>11.2f} {result.ops_per_sec:>11.0f}")
 
         print("=" * 80 + "\n")
 
@@ -221,14 +219,10 @@ class DependencyAnalysisBenchmarks:
     def bench_mixed_language(self) -> None:
         """Benchmark analyzing mixed-language project."""
         changes = [
-            FileChange(f"{i}", f"file{i}.py", "added", "+def func():\n+    pass")
-            for i in range(10)
+            FileChange(f"{i}", f"file{i}.py", "added", "+def func():\n+    pass") for i in range(10)
         ]
         changes.extend(
-            [
-                FileChange(f"{i+10}", f"file{i}.cpp", "added", "+void func() {}")
-                for i in range(10)
-            ]
+            [FileChange(f"{i + 10}", f"file{i}.cpp", "added", "+void func() {}") for i in range(10)]
         )
 
         analyzer = DependencyAnalyzer()
@@ -296,10 +290,7 @@ class BinarySearchBenchmarks:
                 self.call_count += 1
                 return CommandResult.FAIL if self.call_count % 3 == 0 else CommandResult.PASS
 
-        changes = [
-            FileChange(f"{i}", f"file{i}.py", "modified", f"diff{i}")
-            for i in range(8)
-        ]
+        changes = [FileChange(f"{i}", f"file{i}.py", "modified", f"diff{i}") for i in range(8)]
 
         def run_bisect() -> None:
             engine = BifurcationEngine(MockGit(), MockRunner(3))  # type: ignore[arg-type]
@@ -330,10 +321,7 @@ class BinarySearchBenchmarks:
                 self.call_count += 1
                 return CommandResult.FAIL if self.call_count % 5 == 0 else CommandResult.PASS
 
-        changes = [
-            FileChange(f"{i}", f"file{i}.py", "modified", f"diff{i}")
-            for i in range(32)
-        ]
+        changes = [FileChange(f"{i}", f"file{i}.py", "modified", f"diff{i}") for i in range(32)]
 
         def run_bisect() -> None:
             engine = BifurcationEngine(MockGit(), MockRunner())  # type: ignore[arg-type]
@@ -364,10 +352,7 @@ class BinarySearchBenchmarks:
                 self.call_count += 1
                 return CommandResult.FAIL if self.call_count % 7 == 0 else CommandResult.PASS
 
-        changes = [
-            FileChange(f"{i}", f"file{i}.py", "modified", f"diff{i}")
-            for i in range(128)
-        ]
+        changes = [FileChange(f"{i}", f"file{i}.py", "modified", f"diff{i}") for i in range(128)]
 
         def run_bisect() -> None:
             engine = BifurcationEngine(MockGit(), MockRunner())  # type: ignore[arg-type]
@@ -400,7 +385,13 @@ class BinarySearchBenchmarks:
 
         # Create changes with dependencies
         changes = [
-            FileChange(f"{i}", f"file{i}.py", "modified", f"diff{i}", dependencies=[f"{i-1}"] if i > 0 else [])
+            FileChange(
+                f"{i}",
+                f"file{i}.py",
+                "modified",
+                f"diff{i}",
+                dependencies=[f"{i - 1}"] if i > 0 else [],
+            )
             for i in range(16)
         ]
 
@@ -438,7 +429,13 @@ class DependencyGraphBenchmarks:
     def bench_graph_construction(self) -> None:
         """Benchmark dependency graph construction."""
         changes = [
-            FileChange(f"{i}", f"file{i}.py", "modified", f"diff{i}", dependencies=[f"{i-1}"] if i > 0 else [])
+            FileChange(
+                f"{i}",
+                f"file{i}.py",
+                "modified",
+                f"diff{i}",
+                dependencies=[f"{i - 1}"] if i > 0 else [],
+            )
             for i in range(50)
         ]
 
@@ -452,7 +449,13 @@ class DependencyGraphBenchmarks:
     def bench_transitive_dependencies(self) -> None:
         """Benchmark transitive dependency resolution."""
         changes = [
-            FileChange(f"{i}", f"file{i}.py", "modified", f"diff{i}", dependencies=[f"{i-1}"] if i > 0 else [])
+            FileChange(
+                f"{i}",
+                f"file{i}.py",
+                "modified",
+                f"diff{i}",
+                dependencies=[f"{i - 1}"] if i > 0 else [],
+            )
             for i in range(50)
         ]
 
@@ -468,7 +471,13 @@ class DependencyGraphBenchmarks:
     def bench_topological_sort(self) -> None:
         """Benchmark topological sorting."""
         changes = [
-            FileChange(f"{i}", f"file{i}.py", "modified", f"diff{i}", dependencies=[f"{i-1}"] if i > 0 else [])
+            FileChange(
+                f"{i}",
+                f"file{i}.py",
+                "modified",
+                f"diff{i}",
+                dependencies=[f"{i - 1}"] if i > 0 else [],
+            )
             for i in range(100)
         ]
 
@@ -490,7 +499,9 @@ class DependencyGraphBenchmarks:
                 idx = chain * 20 + i
                 deps = [f"{chain * 20 + i - 1}"] if i > 0 else []
                 changes.append(
-                    FileChange(f"{idx}", f"file{idx}.py", "modified", f"diff{idx}", dependencies=deps)
+                    FileChange(
+                        f"{idx}", f"file{idx}.py", "modified", f"diff{idx}", dependencies=deps
+                    )
                 )
 
         graph = DependencyGraph(changes)

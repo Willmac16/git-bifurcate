@@ -51,9 +51,7 @@ class DependencyAnalyzer:
 
         return dependencies
 
-    def analyze_hunk_dependencies(
-        self, hunks: list[HunkChange]
-    ) -> dict[str, list[str]]:
+    def analyze_hunk_dependencies(self, hunks: list[HunkChange]) -> dict[str, list[str]]:
         """Analyze dependencies between hunk changes.
 
         Args:
@@ -438,7 +436,7 @@ class DependencyAnalyzer:
 
         for line in added_lines:
             # Import/use statements
-            if match := re.match(r'^\s*const\s+(\w+)\s*=\s*@import', line):
+            if match := re.match(r"^\s*const\s+(\w+)\s*=\s*@import", line):
                 definitions.add(match.group(1))
 
             # Function definitions
@@ -516,9 +514,7 @@ class DependencyAnalyzer:
         self.symbol_definitions[change.file_path] = definitions
         self.symbol_references[change.file_path] = references
 
-    def detect_import_dependencies(
-        self, changes: list[FileChange]
-    ) -> dict[str, list[str]]:
+    def detect_import_dependencies(self, changes: list[FileChange]) -> dict[str, list[str]]:
         """Detect import-based dependencies between changes.
 
         Args:
@@ -558,9 +554,7 @@ class DependencyAnalyzer:
 
         return dependencies
 
-    def detect_contextual_dependencies(
-        self, hunks: list[HunkChange]
-    ) -> dict[str, list[str]]:
+    def detect_contextual_dependencies(self, hunks: list[HunkChange]) -> dict[str, list[str]]:
         """Detect dependencies based on line proximity and context.
 
         Hunks that modify nearby lines or the same logical block likely depend
