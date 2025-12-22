@@ -5,8 +5,6 @@ Covers C/C++, Rust, Go, Swift, Zig, and Verilog/SystemVerilog.
 
 from __future__ import annotations
 
-import pytest
-
 from git_bifurcate.dependency_analyzer import DependencyAnalyzer
 from git_bifurcate.models import ChangeStatus, FileChange, HunkChange
 
@@ -843,7 +841,7 @@ class TestCrosslanguageDependencies:
         )
 
         analyzer = DependencyAnalyzer()
-        defs, refs = analyzer._extract_hunk_symbols(hunk)
+        defs, _refs = analyzer._extract_hunk_symbols(hunk)
 
         # Should use fallback regex
         assert "incomplete" in defs
@@ -864,7 +862,7 @@ class TestCrosslanguageDependencies:
         )
 
         analyzer = DependencyAnalyzer()
-        defs, refs = analyzer._extract_hunk_symbols(hunk)
+        defs, _refs = analyzer._extract_hunk_symbols(hunk)
 
         # Should use generic extraction
         assert "myFunc" in defs
