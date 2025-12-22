@@ -2,6 +2,8 @@
 
 from __future__ import annotations
 
+import math
+import time
 from collections.abc import Callable
 from typing import cast
 
@@ -26,6 +28,8 @@ class BifurcationEngine:
         self.test_runner = test_runner
         self.tested_combinations: dict[str, CommandResult] = {}
         self.interaction_failure: list[int] | None = None
+        self.test_times: list[float] = []  # Track test execution times
+        self.start_time: float | None = None
 
     def _get_combination_key(self, indices: list[int]) -> str:
         """Get cache key for a combination of changes."""
@@ -59,8 +63,11 @@ class BifurcationEngine:
             # Failed to apply - likely dependency issues
             result = CommandResult.SKIP
         else:
-            # Run test
+            # Run test and track time
+            test_start = time.time()
             result = self.test_runner.run()
+            test_duration = time.time() - test_start
+            self.test_times.append(test_duration)
 
         # Cache result
         self.tested_combinations[cache_key] = result
@@ -88,6 +95,7 @@ class BifurcationEngine:
         """
         search_space = list(range(len(changes)))
         iteration = 0
+        self.start_time = time.time()
 
         while len(search_space) > 1:
             iteration += 1
@@ -96,10 +104,23 @@ class BifurcationEngine:
             upper_half = search_space[mid:]
 
             if verbose:
-                click.echo(
+                # Calculate estimates
+                remaining_iters = self.estimate_remaining_iterations(len(search_space))
+                remaining_time = self.estimate_remaining_time(len(search_space))
+                avg_time = self.get_average_test_time()
+
+                progress_msg = (
                     f"Iteration {iteration}: Testing changes {lower_half[0] + 1}-"
-                    f"{lower_half[-1] + 1} of {len(changes)}..."
+                    f"{lower_half[-1] + 1} of {len(changes)}"
                 )
+
+                if avg_time > 0:
+                    progress_msg += (
+                        f" | Est. {remaining_iters} iterations remaining"
+                        f" (~{self.format_time(remaining_time)})"
+                    )
+
+                click.echo(progress_msg)
 
             # Test lower half
             result = self._test_changes(changes, base_commit, lower_half)
@@ -182,7 +203,11 @@ class BifurcationEngine:
             # Failed to apply - likely dependency issues
             result = CommandResult.SKIP
         else:
+            # Run test and track time
+            test_start = time.time()
             result = self.test_runner.run()
+            test_duration = time.time() - test_start
+            self.test_times.append(test_duration)
 
         # Cache result
         self.tested_combinations[cache_key] = result
@@ -211,6 +236,8 @@ class BifurcationEngine:
         """
         search_space = list(range(len(hunks)))
         iteration = 0
+        if self.start_time is None:
+            self.start_time = time.time()
 
         while len(search_space) > 1:
             iteration += 1
@@ -219,10 +246,23 @@ class BifurcationEngine:
             upper_half = search_space[mid:]
 
             if verbose:
-                click.echo(
+                # Calculate estimates
+                remaining_iters = self.estimate_remaining_iterations(len(search_space))
+                remaining_time = self.estimate_remaining_time(len(search_space))
+                avg_time = self.get_average_test_time()
+
+                progress_msg = (
                     f"Iteration {iteration}: Testing hunks {lower_half[0] + 1}-"
-                    f"{lower_half[-1] + 1} of {len(hunks)}..."
+                    f"{lower_half[-1] + 1} of {len(hunks)}"
                 )
+
+                if avg_time > 0:
+                    progress_msg += (
+                        f" | Est. {remaining_iters} iterations remaining"
+                        f" (~{self.format_time(remaining_time)})"
+                    )
+
+                click.echo(progress_msg)
 
             # Test lower half
             result = self._test_hunk_changes(hunks, base_commit, bad_commit, lower_half)
@@ -403,16 +443,92 @@ class BifurcationEngine:
         # Remove duplicates
         return list(set(pairs))
 
-    def get_stats(self) -> dict[str, int]:
+    def get_stats(self) -> dict[str, int | float]:
         """Get statistics about bifurcation session.
 
         Returns:
             Dictionary with stats like number of tests run.
         """
-        return {
+        stats = {
             "tests_run": len(self.tested_combinations),
             "passed": sum(1 for r in self.tested_combinations.values() if r == CommandResult.PASS),
             "failed": sum(1 for r in self.tested_combinations.values() if r == CommandResult.FAIL),
             "skipped": sum(1 for r in self.tested_combinations.values() if r == CommandResult.SKIP),
             "errors": sum(1 for r in self.tested_combinations.values() if r == CommandResult.ERROR),
         }
+
+        # Add timing statistics
+        if self.test_times:
+            stats["avg_test_time"] = sum(self.test_times) / len(self.test_times)
+            stats["total_test_time"] = sum(self.test_times)
+
+        return stats
+
+    def get_average_test_time(self) -> float:
+        """Get average test execution time.
+
+        Returns:
+            Average time in seconds, or 0 if no tests run yet.
+        """
+        if not self.test_times:
+            return 0.0
+        return sum(self.test_times) / len(self.test_times)
+
+    def estimate_remaining_iterations(self, search_space_size: int) -> int:
+        """Estimate remaining iterations in binary search.
+
+        Args:
+            search_space_size: Current size of search space.
+
+        Returns:
+            Estimated number of remaining iterations.
+        """
+        if search_space_size <= 1:
+            return 0
+        # Binary search takes log2(n) iterations
+        return math.ceil(math.log2(search_space_size))
+
+    def estimate_remaining_time(self, search_space_size: int) -> float:
+        """Estimate remaining time to complete bifurcation.
+
+        Args:
+            search_space_size: Current size of search space.
+
+        Returns:
+            Estimated time in seconds, or 0 if not enough data.
+        """
+        avg_time = self.get_average_test_time()
+        if avg_time == 0:
+            return 0.0
+
+        remaining_iterations = self.estimate_remaining_iterations(search_space_size)
+        # Each iteration typically runs 1-2 tests (lower half, maybe upper half)
+        # Conservative estimate: 2 tests per iteration
+        return remaining_iterations * avg_time * 2
+
+    @staticmethod
+    def format_time(seconds: float) -> str:
+        """Format time duration in a human-readable way.
+
+        Args:
+            seconds: Time duration in seconds.
+
+        Returns:
+            Formatted time string (e.g., "2m 30s", "45s", "1h 5m").
+        """
+        if seconds < 1:
+            return "< 1s"
+
+        hours = int(seconds // 3600)
+        minutes = int((seconds % 3600) // 60)
+        secs = int(seconds % 60)
+
+        parts = []
+        if hours > 0:
+            parts.append(f"{hours}h")
+        if minutes > 0:
+            parts.append(f"{minutes}m")
+        if secs > 0 or not parts:
+            parts.append(f"{secs}s")
+
+        return " ".join(parts)

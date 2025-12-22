@@ -7,7 +7,12 @@ from typing import cast
 
 import click
 
+from git_bifurcate.commit_bisect import CommitBisector
 from git_bifurcate.core import BifurcationEngine
+from git_bifurcate.dependency_analyzer import (
+    apply_dependency_analysis,
+    apply_hunk_dependency_analysis,
+)
 from git_bifurcate.git_ops import GitRepo
 from git_bifurcate.models import BifurcationState, CommandResult, FileChange, HunkChange, Strategy
 from git_bifurcate.parser import parse_file_changes, parse_hunk_changes
@@ -50,7 +55,26 @@ def main(ctx: click.Context, version: bool) -> None:
     "-p",
     help="Parent commit SHA (defaults to commit^)",
 )
-def start(commit: str | None, test: str, strategy: str, parent: str | None) -> None:
+@click.option(
+    "--analyze-deps",
+    "-d",
+    is_flag=True,
+    help="Analyze and detect dependencies between changes",
+)
+@click.option(
+    "--find-more",
+    "-m",
+    is_flag=True,
+    help="Continue searching for more breaking changes after finding the first",
+)
+def start(
+    commit: str | None,
+    test: str,
+    strategy: str,
+    parent: str | None,
+    analyze_deps: bool,
+    find_more: bool,
+) -> None:
     """Start bifurcating a commit to find breaking changes.
 
     COMMIT is the commit SHA to bifurcate (defaults to HEAD).
@@ -104,10 +128,22 @@ def start(commit: str | None, test: str, strategy: str, parent: str | None) -> N
                 click.echo("Error: No changes found in commit")
                 sys.exit(1)
 
+            # Analyze dependencies if requested
+            if analyze_deps:
+                click.echo("Analyzing dependencies between changes...")
+                apply_dependency_analysis(file_changes)
+                dep_count = sum(len(c.dependencies) for c in file_changes)
+                click.echo(f"Found {dep_count} dependencies")
+
             # Display changes
             click.echo("\nChanges to bifurcate:")
             for i, file_change in enumerate(file_changes):
-                click.echo(f"  [{i}] {file_change.file_path} ({file_change.change_type})")
+                deps_info = (
+                    f" (depends on: {file_change.dependencies})" if file_change.dependencies else ""
+                )
+                click.echo(
+                    f"  [{i}] {file_change.file_path} ({file_change.change_type}){deps_info}"
+                )
             click.echo()
 
             # First, verify that all changes together reproduce the failure
@@ -163,29 +199,76 @@ def start(commit: str | None, test: str, strategy: str, parent: str | None) -> N
             click.echo("=" * 60)
             click.echo()
 
-            breaking_file = engine.bifurcate_files(file_changes, parent_sha, verbose=True)
+            breaking_files = []
+            search_indices = list(range(len(file_changes)))
 
-            if breaking_file:
-                click.echo()
-                click.echo("=" * 60)
-                click.echo("BREAKING CHANGE FOUND!")
-                click.echo("=" * 60)
-                click.echo()
-                click.echo(f"File: {breaking_file.file_path}")
-                click.echo(f"Type: {breaking_file.change_type}")
-                click.echo()
-                click.echo("Diff content:")
-                click.echo("-" * 60)
-                click.echo(breaking_file.diff_content)
-                click.echo("-" * 60)
-                click.echo()
+            while True:
+                # Create new engine for each search to reset state
+                engine = BifurcationEngine(git, test_runner)
 
-                if breaking_file.change_type == "submodule":
-                    _analyze_submodule_drift(
-                        git, test_runner, parent_sha, file_changes, breaking_file, commit_sha
+                # Filter to only search remaining indices
+                remaining_changes = [file_changes[i] for i in search_indices]
+
+                if not remaining_changes:
+                    break
+
+                breaking_file = engine.bifurcate_files(remaining_changes, parent_sha, verbose=True)
+
+                if breaking_file:
+                    # Find the original index
+                    original_idx = next(
+                        i for i in search_indices if file_changes[i].id == breaking_file.id
                     )
+                    breaking_files.append((original_idx, breaking_file))
 
+                    click.echo()
+                    click.echo("=" * 60)
+                    if find_more:
+                        click.echo(f"BREAKING CHANGE #{len(breaking_files)} FOUND!")
+                    else:
+                        click.echo("BREAKING CHANGE FOUND!")
+                    click.echo("=" * 60)
+                    click.echo()
+                    click.echo(f"File: {breaking_file.file_path}")
+                    click.echo(f"Type: {breaking_file.change_type}")
+                    click.echo()
+                    click.echo("Diff content:")
+                    click.echo("-" * 60)
+                    click.echo(breaking_file.diff_content)
+                    click.echo("-" * 60)
+                    click.echo()
+
+                    if breaking_file.change_type == "submodule":
+                        _analyze_submodule_drift(
+                            git, test_runner, parent_sha, file_changes, breaking_file, commit_sha
+                        )
+
+                    # Remove this change from search space
+                    search_indices.remove(original_idx)
+
+                    # Ask if user wants to find more (if flag is set and there are more changes)
+                    if find_more and search_indices:
+                        if not click.confirm("\nContinue searching for more breaking changes?"):
+                            break
+                    else:
+                        break
+                else:
+                    # No more single breaking changes found
+                    break
+
+            # Show summary (only if find_more was used and multiple were found)
+            if breaking_files:
+                if find_more and len(breaking_files) > 1:
+                    click.echo()
+                    click.echo("=" * 60)
+                    click.echo(f"FOUND {len(breaking_files)} BREAKING CHANGE(S)")
+                    click.echo("=" * 60)
+                    for idx, (orig_idx, bf) in enumerate(breaking_files, 1):
+                        click.echo(f"\n{idx}. [{orig_idx}] {bf.file_path} ({bf.change_type})")
+
+                click.echo()
                 # Show stats
+                click.echo()
                 stats = engine.get_stats()
                 click.echo("Statistics:")
                 click.echo(f"  Total tests run: {stats['tests_run']}")
@@ -193,6 +276,13 @@ def start(commit: str | None, test: str, strategy: str, parent: str | None) -> N
                 click.echo(f"  Failed: {stats['failed']}")
                 click.echo(f"  Skipped: {stats['skipped']}")
                 click.echo(f"  Errors: {stats['errors']}")
+                if "avg_test_time" in stats:
+                    click.echo(
+                        f"  Average test time: {BifurcationEngine.format_time(stats['avg_test_time'])}"
+                    )
+                    click.echo(
+                        f"  Total time: {BifurcationEngine.format_time(stats['total_test_time'])}"
+                    )
 
                 # Clean up
                 click.echo()
@@ -232,11 +322,21 @@ def start(commit: str | None, test: str, strategy: str, parent: str | None) -> N
                 click.echo("Error: No changes found in commit")
                 sys.exit(1)
 
+            # Analyze dependencies if requested
+            if analyze_deps:
+                click.echo("Analyzing dependencies between hunks...")
+                apply_hunk_dependency_analysis(hunk_changes)
+                dep_count = sum(len(h.dependencies) for h in hunk_changes)
+                click.echo(f"Found {dep_count} dependencies")
+
             # Display changes
             click.echo("\nChanges to bifurcate:")
             for i, hunk_change in enumerate(hunk_changes):
+                deps_info = (
+                    f" (depends on: {hunk_change.dependencies})" if hunk_change.dependencies else ""
+                )
                 click.echo(
-                    f"  [{i}] {hunk_change.file_path}:{hunk_change.start_line}-{hunk_change.end_line}"
+                    f"  [{i}] {hunk_change.file_path}:{hunk_change.start_line}-{hunk_change.end_line}{deps_info}"
                 )
             click.echo()
 
@@ -293,26 +393,75 @@ def start(commit: str | None, test: str, strategy: str, parent: str | None) -> N
             click.echo("=" * 60)
             click.echo()
 
-            breaking_hunk = engine.bifurcate_hunks(
-                hunk_changes, parent_sha, commit_sha, verbose=True
-            )
+            breaking_hunks = []
+            search_indices = list(range(len(hunk_changes)))
 
-            if breaking_hunk:
-                click.echo()
-                click.echo("=" * 60)
-                click.echo("BREAKING CHANGE FOUND!")
-                click.echo("=" * 60)
-                click.echo()
-                click.echo(f"File: {breaking_hunk.file_path}")
-                click.echo(f"Lines: {breaking_hunk.start_line}-{breaking_hunk.end_line}")
-                click.echo()
-                click.echo("Diff content:")
-                click.echo("-" * 60)
-                click.echo(breaking_hunk.diff_content)
-                click.echo("-" * 60)
-                click.echo()
+            while True:
+                # Create new engine for each search to reset state
+                engine = BifurcationEngine(git, test_runner)
 
+                # Filter to only search remaining indices
+                remaining_hunks = [hunk_changes[i] for i in search_indices]
+
+                if not remaining_hunks:
+                    break
+
+                breaking_hunk = engine.bifurcate_hunks(
+                    remaining_hunks, parent_sha, commit_sha, verbose=True
+                )
+
+                if breaking_hunk:
+                    # Find the original index
+                    original_idx = next(
+                        i for i in search_indices if hunk_changes[i].id == breaking_hunk.id
+                    )
+                    breaking_hunks.append((original_idx, breaking_hunk))
+
+                    click.echo()
+                    click.echo("=" * 60)
+                    if find_more:
+                        click.echo(f"BREAKING CHANGE #{len(breaking_hunks)} FOUND!")
+                    else:
+                        click.echo("BREAKING CHANGE FOUND!")
+                    click.echo("=" * 60)
+                    click.echo()
+                    click.echo(f"File: {breaking_hunk.file_path}")
+                    click.echo(f"Lines: {breaking_hunk.start_line}-{breaking_hunk.end_line}")
+                    click.echo()
+                    click.echo("Diff content:")
+                    click.echo("-" * 60)
+                    click.echo(breaking_hunk.diff_content)
+                    click.echo("-" * 60)
+                    click.echo()
+
+                    # Remove this hunk from search space
+                    search_indices.remove(original_idx)
+
+                    # Ask if user wants to find more (if flag is set and there are more hunks)
+                    if find_more and search_indices:
+                        if not click.confirm("\nContinue searching for more breaking changes?"):
+                            break
+                    else:
+                        break
+                else:
+                    # No more single breaking changes found
+                    break
+
+            # Show summary (only if find_more was used and multiple were found)
+            if breaking_hunks:
+                if find_more and len(breaking_hunks) > 1:
+                    click.echo()
+                    click.echo("=" * 60)
+                    click.echo(f"FOUND {len(breaking_hunks)} BREAKING CHANGE(S)")
+                    click.echo("=" * 60)
+                    for idx, (orig_idx, bh) in enumerate(breaking_hunks, 1):
+                        click.echo(
+                            f"\n{idx}. [{orig_idx}] {bh.file_path}:{bh.start_line}-{bh.end_line}"
+                        )
+
+                click.echo()
                 # Show stats
+                click.echo()
                 stats = engine.get_stats()
                 click.echo("Statistics:")
                 click.echo(f"  Total tests run: {stats['tests_run']}")
@@ -320,6 +469,13 @@ def start(commit: str | None, test: str, strategy: str, parent: str | None) -> N
                 click.echo(f"  Failed: {stats['failed']}")
                 click.echo(f"  Skipped: {stats['skipped']}")
                 click.echo(f"  Errors: {stats['errors']}")
+                if "avg_test_time" in stats:
+                    click.echo(
+                        f"  Average test time: {BifurcationEngine.format_time(stats['avg_test_time'])}"
+                    )
+                    click.echo(
+                        f"  Total time: {BifurcationEngine.format_time(stats['total_test_time'])}"
+                    )
 
                 # Clean up
                 click.echo()
@@ -471,6 +627,178 @@ def reset(force: bool) -> None:
         click.echo("  1. git reset --hard to desired commit")
         click.echo("  2. rm .git/bifurcate-state.json")
         click.echo("  3. git branch -D bifurcate-temp (if exists)")
+        sys.exit(1)
+
+
+@main.command()
+@click.argument("good_commit")
+@click.argument("bad_commit")
+@click.option(
+    "--test",
+    "-t",
+    required=True,
+    help="Test command to run (e.g., 'pytest tests/test_feature.py')",
+)
+def bisect(good_commit: str, bad_commit: str, test: str) -> None:
+    """Bisect commits to find the first bad commit.
+
+    GOOD_COMMIT is the known good commit SHA.
+    BAD_COMMIT is the known bad commit SHA.
+
+    Example:
+        git bifurcate bisect v1.0.0 HEAD --test "npm test"
+    """
+    try:
+        git = GitRepo()
+        test_runner = CommandRunner(test)
+
+        click.echo(f"Bisecting commits from {good_commit[:8]} to {bad_commit[:8]}")
+        click.echo(f"Test command: {test}")
+        click.echo()
+
+        bisector = CommitBisector(git, test_runner)
+
+        # Get stats first
+        stats = bisector.get_bisect_stats(good_commit, bad_commit)
+        click.echo(f"Total commits to search: {stats['total_commits']}")
+        click.echo(f"Estimated iterations: {stats['estimated_iterations']}")
+        if stats["has_submodules"]:
+            click.echo("Note: Repository contains submodules")
+        click.echo()
+
+        # Run bisection
+        first_bad = bisector.bisect_commits(good_commit, bad_commit, verbose=True)
+
+        if first_bad:
+            click.echo()
+            click.echo("=" * 60)
+            click.echo("FIRST BAD COMMIT FOUND!")
+            click.echo("=" * 60)
+            click.echo()
+            click.echo(f"Commit: {first_bad}")
+            click.echo()
+            click.echo("You can now run:")
+            click.echo(f'  git bifurcate start {first_bad} --test "{test}"')
+            click.echo("to find the exact change that broke the tests.")
+        else:
+            click.echo()
+            click.echo("No bad commit found in the range.")
+
+    except Exception as e:
+        click.echo(f"Error during commit bisection: {e}")
+        sys.exit(1)
+
+
+@main.command(name="continue")
+def continue_bifurcation() -> None:
+    """Resume an interrupted bifurcation session.
+
+    Loads the saved state and continues the bisection process.
+    """
+    if not BifurcationState.exists():
+        click.echo("No bifurcation in progress to resume.")
+        click.echo()
+        click.echo("To start a new bifurcation:")
+        click.echo("  git bifurcate start <commit> --test <command>")
+        sys.exit(1)
+
+    try:
+        state = BifurcationState.load()
+
+        click.echo("=" * 60)
+        click.echo("RESUMING BIFURCATION")
+        click.echo("=" * 60)
+        click.echo()
+        click.echo(f"Commit: {state.commit_sha[:8]}")
+        click.echo(f"Parent: {state.parent_sha[:8]}")
+        click.echo(f"Strategy: {state.strategy.value}")
+        click.echo(f"Test command: {state.test_command}")
+        click.echo(f"Iteration: {state.current_iteration}")
+        click.echo(f"Search space: {len(state.search_space)} changes remaining")
+        click.echo()
+
+        git = GitRepo()
+        test_runner = CommandRunner(state.test_command)
+        engine = BifurcationEngine(git, test_runner)
+
+        # Continue from where we left off
+        if state.strategy == Strategy.FILE:
+            file_changes = cast(list[FileChange], state.changes)
+            remaining_changes = [file_changes[i] for i in state.search_space]
+
+            if not remaining_changes:
+                click.echo("Search space is empty. Bifurcation may be complete.")
+                sys.exit(0)
+
+            breaking_file = engine.bifurcate_files(
+                remaining_changes, state.parent_sha, verbose=True
+            )
+
+            if breaking_file:
+                click.echo()
+                click.echo("=" * 60)
+                click.echo("BREAKING CHANGE FOUND!")
+                click.echo("=" * 60)
+                click.echo()
+                click.echo(f"File: {breaking_file.file_path}")
+                click.echo(f"Type: {breaking_file.change_type}")
+                click.echo()
+                click.echo("Diff content:")
+                click.echo("-" * 60)
+                click.echo(breaking_file.diff_content)
+                click.echo("-" * 60)
+            else:
+                click.echo()
+                click.echo("No single breaking change found.")
+
+        elif state.strategy == Strategy.HUNK:
+            hunk_changes = cast(list[HunkChange], state.changes)
+            remaining_hunks = [hunk_changes[i] for i in state.search_space]
+
+            if not remaining_hunks:
+                click.echo("Search space is empty. Bifurcation may be complete.")
+                sys.exit(0)
+
+            breaking_hunk = engine.bifurcate_hunks(
+                remaining_hunks, state.parent_sha, state.commit_sha, verbose=True
+            )
+
+            if breaking_hunk:
+                click.echo()
+                click.echo("=" * 60)
+                click.echo("BREAKING CHANGE FOUND!")
+                click.echo("=" * 60)
+                click.echo()
+                click.echo(f"File: {breaking_hunk.file_path}")
+                click.echo(f"Lines: {breaking_hunk.start_line}-{breaking_hunk.end_line}")
+                click.echo()
+                click.echo("Diff content:")
+                click.echo("-" * 60)
+                click.echo(breaking_hunk.diff_content)
+                click.echo("-" * 60)
+            else:
+                click.echo()
+                click.echo("No single breaking change found.")
+
+        # Show stats
+        stats = engine.get_stats()
+        click.echo()
+        click.echo("Statistics:")
+        click.echo(f"  Total tests run: {stats['tests_run']}")
+        click.echo(f"  Passed: {stats['passed']}")
+        click.echo(f"  Failed: {stats['failed']}")
+        click.echo(f"  Skipped: {stats['skipped']}")
+        click.echo(f"  Errors: {stats['errors']}")
+
+        # Clean up
+        click.echo()
+        click.echo("Cleaning up...")
+        git.reset_hard(state.commit_sha)
+        BifurcationState.delete()
+        click.echo("✓ Done")
+
+    except Exception as e:
+        click.echo(f"Error resuming bifurcation: {e}")
         sys.exit(1)
 
 
