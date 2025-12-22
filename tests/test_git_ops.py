@@ -676,12 +676,9 @@ def test_get_submodule_changes(git_repo: Path, temp_dir: Path) -> None:
         capture_output=True,
     )
     subprocess.run(["git", "commit", "-am", "Add submodule"], cwd=git_repo, check=True)
-    parent_sha = (
-        subprocess.run(
-            ["git", "rev-parse", "HEAD"], cwd=git_repo, check=True, capture_output=True, text=True
-        )
-        .stdout.strip()
-    )
+    parent_sha = subprocess.run(
+        ["git", "rev-parse", "HEAD"], cwd=git_repo, check=True, capture_output=True, text=True
+    ).stdout.strip()
 
     submodule_clone = git_repo / "vendor/lib"
     subprocess.run(
@@ -690,39 +687,30 @@ def test_get_submodule_changes(git_repo: Path, temp_dir: Path) -> None:
     subprocess.run(
         ["git", "-C", str(submodule_clone), "config", "user.email", "test@example.com"], check=True
     )
-    old_sha = (
-        subprocess.run(
-            ["git", "-C", str(submodule_clone), "rev-parse", "HEAD"],
-            check=True,
-            capture_output=True,
-            text=True,
-        )
-        .stdout.strip()
-    )
+    old_sha = subprocess.run(
+        ["git", "-C", str(submodule_clone), "rev-parse", "HEAD"],
+        check=True,
+        capture_output=True,
+        text=True,
+    ).stdout.strip()
 
     (submodule_clone / "dep.txt").write_text("v2\n")
     subprocess.run(
         ["git", "-C", str(submodule_clone), "add", "dep.txt"], check=True, capture_output=True
     )
     subprocess.run(["git", "-C", str(submodule_clone), "commit", "-m", "Update dep"], check=True)
-    new_sha = (
-        subprocess.run(
-            ["git", "-C", str(submodule_clone), "rev-parse", "HEAD"],
-            check=True,
-            capture_output=True,
-            text=True,
-        )
-        .stdout.strip()
-    )
+    new_sha = subprocess.run(
+        ["git", "-C", str(submodule_clone), "rev-parse", "HEAD"],
+        check=True,
+        capture_output=True,
+        text=True,
+    ).stdout.strip()
 
     subprocess.run(["git", "add", "vendor/lib"], cwd=git_repo, check=True)
     subprocess.run(["git", "commit", "-m", "Update submodule"], cwd=git_repo, check=True)
-    bad_sha = (
-        subprocess.run(
-            ["git", "rev-parse", "HEAD"], cwd=git_repo, check=True, capture_output=True, text=True
-        )
-        .stdout.strip()
-    )
+    bad_sha = subprocess.run(
+        ["git", "rev-parse", "HEAD"], cwd=git_repo, check=True, capture_output=True, text=True
+    ).stdout.strip()
 
     repo = GitRepo(git_repo)
     diff = repo.get_diff(bad_sha, parent_sha)
@@ -765,12 +753,9 @@ def test_apply_nested_submodule_changes(git_repo: Path, temp_dir: Path) -> None:
         capture_output=True,
     )
     subprocess.run(["git", "commit", "-am", "Add submodule"], cwd=git_repo, check=True)
-    parent_sha = (
-        subprocess.run(
-            ["git", "rev-parse", "HEAD"], cwd=git_repo, check=True, capture_output=True, text=True
-        )
-        .stdout.strip()
-    )
+    parent_sha = subprocess.run(
+        ["git", "rev-parse", "HEAD"], cwd=git_repo, check=True, capture_output=True, text=True
+    ).stdout.strip()
 
     submodule_clone = git_repo / "vendor/lib"
     subprocess.run(
@@ -787,12 +772,9 @@ def test_apply_nested_submodule_changes(git_repo: Path, temp_dir: Path) -> None:
     subprocess.run(["git", "-C", str(submodule_clone), "commit", "-m", "Update dep"], check=True)
     subprocess.run(["git", "add", "vendor/lib"], cwd=git_repo, check=True)
     subprocess.run(["git", "commit", "-m", "Update submodule"], cwd=git_repo, check=True)
-    bad_sha = (
-        subprocess.run(
-            ["git", "rev-parse", "HEAD"], cwd=git_repo, check=True, capture_output=True, text=True
-        )
-        .stdout.strip()
-    )
+    bad_sha = subprocess.run(
+        ["git", "rev-parse", "HEAD"], cwd=git_repo, check=True, capture_output=True, text=True
+    ).stdout.strip()
 
     repo = GitRepo(git_repo)
     diff = repo.get_diff(bad_sha, parent_sha)
@@ -804,6 +786,158 @@ def test_apply_nested_submodule_changes(git_repo: Path, temp_dir: Path) -> None:
 
     assert success
     assert (git_repo / "vendor/lib/dep.txt").read_text() == "v2\n"
+
+
+def test_apply_changes_nested_submodule_unavailable(
+    monkeypatch: pytest.MonkeyPatch, git_repo: Path
+) -> None:
+    """Nested submodule updates abort when the submodule cannot be initialized."""
+    repo = GitRepo(git_repo)
+    base_sha = create_commit(git_repo, "base.txt", "base\n", "base")
+
+    change = FileChange(
+        id="0",
+        file_path="nested/file.txt",
+        change_type="modified",
+        diff_content="diff --git a/file b/file\n@@\n-old\n+new",
+        status=ChangeStatus.UNKNOWN,
+        metadata={"submodule_path": "nested", "submodule_old_sha": "abc"},
+    )
+
+    monkeypatch.setattr(repo, "reset_hard", lambda ref: None)
+    monkeypatch.setattr(repo, "apply_patch", lambda patch: True)
+    monkeypatch.setattr(repo, "_ensure_submodule_available", lambda path: False)
+
+    assert not repo.apply_changes([change], base_sha, use_temp_branch=False)
+
+
+def test_apply_changes_nested_checkout_failure(
+    monkeypatch: pytest.MonkeyPatch, git_repo: Path
+) -> None:
+    """Checkout failures inside nested submodules bubble up as False."""
+    repo = GitRepo(git_repo)
+    base_sha = create_commit(git_repo, "base.txt", "base\n", "base")
+
+    change = FileChange(
+        id="0",
+        file_path="nested/file.txt",
+        change_type="modified",
+        diff_content="diff --git a/file b/file\n@@\n-old\n+new",
+        status=ChangeStatus.UNKNOWN,
+        metadata={"submodule_path": "nested", "submodule_old_sha": "abc"},
+    )
+
+    def fake_run(cmd, *args, **kwargs):
+        class Dummy:
+            def __init__(self, returncode: int) -> None:
+                self.returncode = returncode
+                self.stdout = ""
+                self.stderr = ""
+
+        if cmd[:4] == ["git", "-C", str(repo.repo_path / "nested"), "checkout"]:
+            return Dummy(1)
+        return Dummy(0)
+
+    monkeypatch.setattr(repo, "reset_hard", lambda ref: None)
+    monkeypatch.setattr(repo, "apply_patch", lambda patch: True)
+    monkeypatch.setattr(repo, "_ensure_submodule_available", lambda path: True)
+    monkeypatch.setattr(repo, "_apply_patch_in_submodule", lambda *args, **kwargs: True)
+    monkeypatch.setattr(subprocess, "run", fake_run)
+
+    assert not repo.apply_changes([change], base_sha, use_temp_branch=False)
+
+
+def test_get_submodule_changes_edge_paths(monkeypatch: pytest.MonkeyPatch, git_repo: Path) -> None:
+    """get_submodule_changes handles non-submodules and failure paths."""
+    repo = GitRepo(git_repo)
+
+    # Non-submodule change is ignored
+    assert (
+        repo.get_submodule_changes(
+            FileChange("x", "file.txt", "modified", "diff", ChangeStatus.UNKNOWN)
+        )
+        == []
+    )
+
+    # Missing metadata short-circuits
+    missing_meta = FileChange("0", "vendor/lib", "submodule", "diff", ChangeStatus.UNKNOWN)
+    assert repo.get_submodule_changes(missing_meta) == []
+
+    # Submodule unavailable
+    change = FileChange(
+        "1",
+        "vendor/lib",
+        "submodule",
+        "diff",
+        ChangeStatus.UNKNOWN,
+        metadata={"old_sha": "abc", "new_sha": "def"},
+    )
+    monkeypatch.setattr(repo, "_ensure_submodule_available", lambda path: False)
+    assert repo.get_submodule_changes(change) == []
+
+    # Diff command fails
+    monkeypatch.setattr(repo, "_ensure_submodule_available", lambda path: True)
+
+    def fake_run(*args, **kwargs):
+        class Dummy:
+            returncode = 1
+            stdout = ""
+            stderr = ""
+
+        return Dummy()
+
+    monkeypatch.setattr(subprocess, "run", fake_run)
+    assert repo.get_submodule_changes(change) == []
+
+
+def test_apply_patch_in_submodule_branches(monkeypatch: pytest.MonkeyPatch, git_repo: Path) -> None:
+    """_apply_patch_in_submodule handles newline normalization and exceptions."""
+    repo = GitRepo(git_repo)
+
+    calls: list[str] = []
+
+    def fake_run(*args, **kwargs):
+        calls.append(kwargs.get("input", ""))
+
+        class Dummy:
+            returncode = 0
+
+        return Dummy()
+
+    monkeypatch.setattr(subprocess, "run", fake_run)
+    assert repo._apply_patch_in_submodule(".", "diff --git a b\n@@\n-old\n+new") is True
+    assert calls and calls[0].endswith("\n")
+
+    def boom(*args, **kwargs):
+        raise RuntimeError("explode")
+
+    monkeypatch.setattr(subprocess, "run", boom)
+    assert repo._apply_patch_in_submodule(".", "diff") is False
+
+
+def test_apply_changes_nested_patch_failure(
+    monkeypatch: pytest.MonkeyPatch, git_repo: Path
+) -> None:
+    """Nested submodule patch failures short-circuit the apply loop."""
+    repo = GitRepo(git_repo)
+    base_sha = create_commit(git_repo, "base.txt", "base\n", "base")
+
+    change = FileChange(
+        id="0",
+        file_path="nested/file.txt",
+        change_type="modified",
+        diff_content="diff --git a/file b/file\n@@\n-old\n+new",
+        status=ChangeStatus.UNKNOWN,
+        metadata={"submodule_path": "nested", "submodule_old_sha": "abc"},
+    )
+
+    monkeypatch.setattr(repo, "reset_hard", lambda ref: None)
+    monkeypatch.setattr(repo, "apply_patch", lambda patch: True)
+    monkeypatch.setattr(repo, "_ensure_submodule_available", lambda path: True)
+    monkeypatch.setattr(repo, "_apply_patch_in_submodule", lambda *args, **kwargs: False)
+    monkeypatch.setattr(subprocess, "run", lambda *args, **kwargs: SimpleNamespace(returncode=0))
+
+    assert not repo.apply_changes([change], base_sha, use_temp_branch=False)
 
 
 def test_get_parent_commit_merge_commit(git_repo: Path) -> None:

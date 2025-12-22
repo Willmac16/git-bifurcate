@@ -11,7 +11,12 @@ from types import SimpleNamespace
 import pytest
 from click.testing import CliRunner
 
-from git_bifurcate.cli import main
+from git_bifurcate.cli import (
+    _analyze_submodule_drift,
+    _analyze_submodule_interactions,
+    main,
+)
+from git_bifurcate.git_ops import GitRepo
 from git_bifurcate.models import (
     BifurcationState,
     ChangeStatus,
@@ -20,6 +25,7 @@ from git_bifurcate.models import (
     HunkChange,
     Strategy,
 )
+from git_bifurcate.test_runner import CommandRunner
 
 
 @pytest.fixture
@@ -406,12 +412,8 @@ def test_cli_start_no_breaking_file_found(
     file_change = FileChange("0", "file.txt", "modified", "diff", status=ChangeStatus.UNKNOWN)
 
     monkeypatch.setattr(BifurcationState, "exists", classmethod(lambda cls: False))
-    monkeypatch.setattr(
-        BifurcationState, "save", lambda self, filepath=None: None
-    )
-    monkeypatch.setattr(
-        BifurcationState, "delete", staticmethod(lambda filepath=None: None)
-    )
+    monkeypatch.setattr(BifurcationState, "save", lambda self, filepath=None: None)
+    monkeypatch.setattr(BifurcationState, "delete", staticmethod(lambda filepath=None: None))
     monkeypatch.setattr("git_bifurcate.cli.GitRepo", FakeGit)
     monkeypatch.setattr("git_bifurcate.cli.parse_file_changes", lambda diff: [file_change])
     monkeypatch.setattr("git_bifurcate.cli.CommandRunner", lambda cmd: None)
@@ -594,12 +596,8 @@ def test_cli_start_hunk_no_breaking_change(
     )
 
     monkeypatch.setattr(BifurcationState, "exists", classmethod(lambda cls: False))
-    monkeypatch.setattr(
-        BifurcationState, "save", lambda self, filepath=None: None
-    )
-    monkeypatch.setattr(
-        BifurcationState, "delete", staticmethod(lambda filepath=None: None)
-    )
+    monkeypatch.setattr(BifurcationState, "save", lambda self, filepath=None: None)
+    monkeypatch.setattr(BifurcationState, "delete", staticmethod(lambda filepath=None: None))
     monkeypatch.setattr("git_bifurcate.cli.GitRepo", FakeGit)
     monkeypatch.setattr("git_bifurcate.cli.parse_hunk_changes", lambda diff: [hunk])
     monkeypatch.setattr("git_bifurcate.cli.CommandRunner", lambda cmd: None)
@@ -696,9 +694,7 @@ def test_cli_start_cleanup_success(monkeypatch: pytest.MonkeyPatch, runner: CliR
     monkeypatch.setattr(
         BifurcationState, "load", classmethod(lambda cls: SimpleNamespace(commit_sha="abc123"))
     )
-    monkeypatch.setattr(
-        BifurcationState, "delete", staticmethod(lambda filepath=None: None)
-    )
+    monkeypatch.setattr(BifurcationState, "delete", staticmethod(lambda filepath=None: None))
     monkeypatch.setattr("git_bifurcate.cli.GitRepo", git_factory)
 
     result = runner.invoke(main, ["start", "--test", "echo"])
@@ -816,3 +812,197 @@ def test_cli_main_guard_runs(monkeypatch: pytest.MonkeyPatch) -> None:
     with pytest.raises(SystemExit) as excinfo:
         spec.loader.exec_module(module)  # type: ignore[arg-type]
     assert excinfo.value.code == 0
+
+
+def test_cli_start_triggers_submodule_analysis(
+    monkeypatch: pytest.MonkeyPatch, runner: CliRunner
+) -> None:
+    """start calls submodule analysis helpers when a submodule is the culprit."""
+    drift_calls: list[tuple] = []
+
+    class FakeGit:
+        def __init__(self) -> None:
+            self.repo_path = Path(".")
+            self.reset_calls: list[str] = []
+
+        def get_commit(self, ref: str) -> SimpleNamespace:
+            return SimpleNamespace(hexsha="bad")
+
+        def get_parent_commit(self, sha: str) -> str:
+            return "good"
+
+        def get_diff(self, *args, **kwargs) -> str:
+            return "diff"
+
+        def reset_hard(self, ref: str) -> None:
+            self.reset_calls.append(ref)
+
+    sub_change = FileChange("0", "vendor/lib", "submodule", "diff", status=ChangeStatus.UNKNOWN)
+
+    class FakeEngine:
+        def __init__(self, *_: object) -> None:
+            pass
+
+        def _test_changes(self, changes, base, indices):
+            return CommandResult.FAIL if indices else CommandResult.PASS
+
+        def bifurcate_files(self, changes, base, verbose=True):
+            return sub_change
+
+        def get_stats(self) -> dict[str, int]:
+            return {"tests_run": 2, "passed": 1, "failed": 1, "skipped": 0, "errors": 0}
+
+    def fake_drift(git, test_runner, parent_sha, file_changes, breaking_submodule, commit_sha):
+        drift_calls.append((parent_sha, commit_sha, breaking_submodule.file_path))
+
+    monkeypatch.setattr(BifurcationState, "exists", classmethod(lambda cls: False))
+    monkeypatch.setattr("git_bifurcate.cli.GitRepo", FakeGit)
+    monkeypatch.setattr("git_bifurcate.cli.CommandRunner", lambda cmd: None)
+    monkeypatch.setattr("git_bifurcate.cli.BifurcationEngine", FakeEngine)
+    monkeypatch.setattr("git_bifurcate.cli._analyze_submodule_drift", fake_drift)
+    monkeypatch.setattr("git_bifurcate.cli.parse_file_changes", lambda diff: [sub_change])
+
+    result = runner.invoke(main, ["start", "--test", "echo", "HEAD"])
+    assert result.exit_code == 0
+    assert drift_calls and drift_calls[0][2] == "vendor/lib"
+
+
+def test_analyze_submodule_helpers(monkeypatch: pytest.MonkeyPatch) -> None:
+    """Helper functions handle empty and populated submodule diffs."""
+    inner_change = FileChange(
+        "1", "vendor/lib/file.py", "modified", "diff", status=ChangeStatus.UNKNOWN
+    )
+
+    class FakeEngine:
+        def __init__(self, *_: object) -> None:
+            self.interaction_failure: list[int] | None = [0]
+
+        def bifurcate_files(self, changes, base, verbose=True):
+            self.changes_seen = changes
+            return None
+
+    class FakeGit(GitRepo):
+        def __init__(self, inner: list[FileChange]) -> None:
+            self.inner = inner
+            self.reset_calls: list[str] = []
+
+        def get_submodule_changes(self, change: FileChange) -> list[FileChange]:  # type: ignore[override]
+            return self.inner
+
+        def reset_hard(self, ref: str) -> None:
+            self.reset_calls.append(ref)
+
+    class DummyRunner(CommandRunner):
+        def __init__(self) -> None:
+            self.test_command = "noop"
+
+        def run(self) -> CommandResult:
+            return CommandResult.PASS
+
+    # Drift with no inner changes
+    git = FakeGit([])
+    runner = DummyRunner()
+    _analyze_submodule_drift(
+        git,
+        runner,
+        "good",
+        [],
+        FileChange("0", "vendor/lib", "submodule", "diff", status=ChangeStatus.UNKNOWN),
+        "bad",
+    )  # type: ignore[arg-type]
+    assert git.reset_calls == []
+
+    # Drift with inner changes that don't isolate a change
+    git2 = FakeGit([inner_change])
+    monkeypatch.setattr("git_bifurcate.cli.BifurcationEngine", FakeEngine)
+    _analyze_submodule_drift(
+        git2,
+        runner,
+        "good",
+        [],
+        FileChange("0", "vendor/lib", "submodule", "diff", status=ChangeStatus.UNKNOWN),
+        "bad",
+    )  # type: ignore[arg-type]
+    assert git2.reset_calls[-1] == "bad"
+
+    # Drift with a breaking inner change
+    class BreakingEngine(FakeEngine):
+        def bifurcate_files(self, changes, base, verbose=True):
+            return inner_change
+
+    git_break = FakeGit([inner_change])
+    monkeypatch.setattr("git_bifurcate.cli.BifurcationEngine", BreakingEngine)
+    _analyze_submodule_drift(
+        git_break,
+        runner,
+        "good",
+        [],
+        FileChange("0", "vendor/lib", "submodule", "diff", status=ChangeStatus.UNKNOWN),
+        "bad",
+    )  # type: ignore[arg-type]
+    assert git_break.reset_calls[-1] == "bad"
+
+    # Interactions: no submodule changes short-circuit
+    _analyze_submodule_interactions(git, runner, "good", [], "bad")  # type: ignore[arg-type]
+
+    # Interactions with nested changes
+    def get_changes(change: FileChange) -> list[FileChange]:
+        return [inner_change]
+
+    git3 = FakeGit([])
+    git3.get_submodule_changes = get_changes  # type: ignore[assignment]
+    monkeypatch.setattr("git_bifurcate.cli.BifurcationEngine", FakeEngine)
+    _analyze_submodule_interactions(
+        git3,
+        runner,
+        "good",
+        [FileChange("0", "vendor/lib", "submodule", "diff", status=ChangeStatus.UNKNOWN)],
+        "bad",
+    )  # type: ignore[arg-type]
+    assert git3.reset_calls[-1] == "bad"
+
+    # Interactions where no nested diffs are available despite submodule references
+    git_empty_nested = FakeGit([])
+    git_empty_nested.get_submodule_changes = lambda change: []  # type: ignore[assignment]
+    _analyze_submodule_interactions(
+        git_empty_nested,
+        runner,
+        "good",
+        [FileChange("0", "vendor/lib", "submodule", "diff", status=ChangeStatus.UNKNOWN)],
+        "bad",
+    )  # type: ignore[arg-type]
+
+    # Interactions where a breaking nested change is found
+    class BreakingInteractions(FakeEngine):
+        def bifurcate_files(self, changes, base, verbose=True):
+            return inner_change
+
+    git_found = FakeGit([])
+    git_found.get_submodule_changes = get_changes  # type: ignore[assignment]
+    monkeypatch.setattr("git_bifurcate.cli.BifurcationEngine", BreakingInteractions)
+    _analyze_submodule_interactions(
+        git_found,
+        runner,
+        "good",
+        [FileChange("0", "vendor/lib", "submodule", "diff", status=ChangeStatus.UNKNOWN)],
+        "bad",
+    )  # type: ignore[arg-type]
+    assert git_found.reset_calls[-1] == "bad"
+
+    # Interactions where no combination is identified
+    class NoInteractionEngine(FakeEngine):
+        def __init__(self, *_: object) -> None:
+            super().__init__()
+            self.interaction_failure = None
+
+    git_none = FakeGit([])
+    git_none.get_submodule_changes = get_changes  # type: ignore[assignment]
+    monkeypatch.setattr("git_bifurcate.cli.BifurcationEngine", NoInteractionEngine)
+    _analyze_submodule_interactions(
+        git_none,
+        runner,
+        "good",
+        [FileChange("0", "vendor/lib", "submodule", "diff", status=ChangeStatus.UNKNOWN)],
+        "bad",
+    )  # type: ignore[arg-type]
+    assert git_none.reset_calls[-1] == "bad"

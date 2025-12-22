@@ -220,6 +220,31 @@ index 1111111..2222222 160000
     assert changes[0].metadata["new_sha"].startswith("2222")
 
 
+def test_parse_submodule_change_midstream() -> None:
+    """Submodule metadata is recorded when encountered before the final file."""
+    diff_text = """diff --git a/vendor/lib b/vendor/lib
+index 1111111..2222222 160000
+--- a/vendor/lib
++++ b/vendor/lib
+@@ -1 +1 @@
+-Subproject commit 1111111111111111111111111111111111111111
++Subproject commit 2222222222222222222222222222222222222222
+diff --git a/other.txt b/other.txt
+index abcdefg..hijklmn 100644
+--- a/other.txt
++++ b/other.txt
+@@ -1 +1 @@
+-old
++new
+"""
+
+    changes = parse_file_changes(diff_text)
+
+    assert len(changes) == 2
+    assert changes[0].metadata["new_sha"].endswith("2222")
+    assert changes[1].file_path == "other.txt"
+
+
 def test_parse_complex_diff() -> None:
     """Test parsing diff with multiple files and various change types."""
     complex_diff = """diff --git a/added.py b/added.py
