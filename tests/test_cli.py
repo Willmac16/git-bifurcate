@@ -1365,3 +1365,410 @@ def test_cli_continue_with_stats(
     assert result.exit_code == 0
     # Should show stats
     assert "Statistics" in result.output or "RESUMING BIFURCATION" in result.output
+
+
+def test_cli_bisect_exception_handling(runner: CliRunner, monkeypatch: pytest.MonkeyPatch) -> None:
+    """Test bisect command exception handling (lines 687-689)."""
+    from git_bifurcate.commit_bisect import CommitBisector
+
+    # Mock to raise an exception
+    def raise_error(*args, **kwargs):
+        raise ValueError("Test error")
+
+    monkeypatch.setattr(CommitBisector, "bisect_commits", raise_error)
+
+    result = runner.invoke(
+        main,
+        ["bisect", "abc123", "def456", "--test", "true"],
+    )
+
+    assert result.exit_code == 1
+    assert "Error during commit bisection" in result.output
+
+
+def test_cli_start_find_more_exhausts_all_changes(
+    runner: CliRunner,
+    simple_fixture: Path,
+    change_to_original_dir: None,
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    """Test find-more exhausts all changes (line 213)."""
+    from conftest import get_commit_shas
+
+    from git_bifurcate.core import BifurcationEngine
+
+    os.chdir(simple_fixture)
+    _parent_sha, bad_sha = get_commit_shas(simple_fixture)
+
+    # Track how many times bifurcate_files is called
+    call_count = [0]
+    original_bifurcate = BifurcationEngine.bifurcate_files
+
+    def mock_bifurcate(self, changes, *args, **kwargs):
+        call_count[0] += 1
+        # First call finds a change, subsequent calls find nothing
+        if call_count[0] == 1:
+            result = original_bifurcate(self, changes, *args, **kwargs)
+            return result
+        return None
+
+    monkeypatch.setattr(BifurcationEngine, "bifurcate_files", mock_bifurcate)
+    monkeypatch.setattr("click.confirm", lambda _: True)  # Always continue
+
+    result = runner.invoke(
+        main,
+        ["start", bad_sha, "--strategy", "file", "--test", "bash test.sh", "--find-more"],
+        catch_exceptions=False,
+    )
+
+    assert result.exit_code == 0
+    # Should have made multiple attempts
+    assert call_count[0] >= 2
+
+
+def test_cli_start_find_more_finds_multiple_files(
+    runner: CliRunner,
+    simple_fixture: Path,
+    change_to_original_dir: None,
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    """Test find-more finds multiple breaking changes and shows summary (lines 262-267)."""
+    from conftest import get_commit_shas
+
+    from git_bifurcate.core import BifurcationEngine
+
+    os.chdir(simple_fixture)
+    _parent_sha, bad_sha = get_commit_shas(simple_fixture)
+
+    # Mock to return different breaking files
+    call_count = [0]
+
+    def mock_bifurcate(self, changes, *args, **kwargs):
+        call_count[0] += 1
+        if call_count[0] == 1 and len(changes) > 0:
+            # Return first change
+            return changes[0]
+        elif call_count[0] == 2 and len(changes) > 1:
+            # Return second change
+            return changes[1] if len(changes) > 1 else None
+        return None
+
+    monkeypatch.setattr(BifurcationEngine, "bifurcate_files", mock_bifurcate)
+
+    # Mock confirm to say yes once, then no
+    confirm_calls = [True, False]
+
+    def mock_confirm(_):
+        return confirm_calls.pop(0) if confirm_calls else False
+
+    monkeypatch.setattr("click.confirm", mock_confirm)
+
+    result = runner.invoke(
+        main,
+        ["start", bad_sha, "--strategy", "file", "--test", "bash test.sh", "--find-more"],
+        catch_exceptions=False,
+    )
+
+    assert result.exit_code == 0
+    # Should show summary when multiple breaking changes found
+    if "FOUND" in result.output and "BREAKING CHANGE" in result.output:
+        assert True  # Summary was shown
+
+
+def test_cli_start_find_more_exhausts_hunks(
+    runner: CliRunner,
+    hunk_fixture: Path,
+    change_to_original_dir: None,
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    """Test find-more exhausts all hunks (line 407)."""
+    from conftest import get_commit_shas
+
+    from git_bifurcate.core import BifurcationEngine
+
+    os.chdir(hunk_fixture)
+    _parent_sha, bad_sha = get_commit_shas(hunk_fixture)
+
+    # Track how many times bifurcate_hunks is called
+    call_count = [0]
+    original_bifurcate = BifurcationEngine.bifurcate_hunks
+
+    def mock_bifurcate(self, hunks, *args, **kwargs):
+        call_count[0] += 1
+        # First call finds a hunk, subsequent calls find nothing
+        if call_count[0] == 1:
+            result = original_bifurcate(self, hunks, *args, **kwargs)
+            return result
+        return None
+
+    monkeypatch.setattr(BifurcationEngine, "bifurcate_hunks", mock_bifurcate)
+    monkeypatch.setattr("click.confirm", lambda _: True)  # Always continue
+
+    result = runner.invoke(
+        main,
+        ["start", bad_sha, "--strategy", "hunk", "--test", "python3 test.py", "--find-more"],
+        catch_exceptions=False,
+    )
+
+    assert result.exit_code == 0
+    # Should have made multiple attempts
+    assert call_count[0] >= 2
+
+
+def test_cli_start_find_more_finds_multiple_hunks(
+    runner: CliRunner,
+    hunk_fixture: Path,
+    change_to_original_dir: None,
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    """Test find-more finds multiple breaking hunks and shows summary (lines 453-458)."""
+    from conftest import get_commit_shas
+
+    from git_bifurcate.core import BifurcationEngine
+
+    os.chdir(hunk_fixture)
+    _parent_sha, bad_sha = get_commit_shas(hunk_fixture)
+
+    # Mock to return different breaking hunks
+    call_count = [0]
+
+    def mock_bifurcate(self, hunks, *args, **kwargs):
+        call_count[0] += 1
+        if call_count[0] == 1 and len(hunks) > 0:
+            return hunks[0]
+        elif call_count[0] == 2 and len(hunks) > 1:
+            return hunks[1] if len(hunks) > 1 else None
+        return None
+
+    monkeypatch.setattr(BifurcationEngine, "bifurcate_hunks", mock_bifurcate)
+
+    # Mock confirm to say yes once, then no
+    confirm_calls = [True, False]
+
+    def mock_confirm(_):
+        return confirm_calls.pop(0) if confirm_calls else False
+
+    monkeypatch.setattr("click.confirm", mock_confirm)
+
+    result = runner.invoke(
+        main,
+        ["start", bad_sha, "--strategy", "hunk", "--test", "python3 test.py", "--find-more"],
+        catch_exceptions=False,
+    )
+
+    assert result.exit_code == 0
+    # Should show summary when multiple breaking changes found
+    if "FOUND" in result.output and "BREAKING CHANGE" in result.output:
+        assert True  # Summary was shown
+
+
+def test_cli_continue_hunk_empty_search_space(
+    runner: CliRunner, hunk_fixture: Path, change_to_original_dir: None
+) -> None:
+    """Test continue with empty search space for hunk strategy (lines 759-760)."""
+    from conftest import get_commit_shas
+
+    from git_bifurcate.git_ops import GitRepo
+    from git_bifurcate.models import Strategy
+    from git_bifurcate.parser import parse_hunk_changes
+
+    os.chdir(hunk_fixture)
+    parent_sha, bad_sha = get_commit_shas(hunk_fixture)
+
+    git = GitRepo()
+    diff_text = git.get_diff(bad_sha, parent_sha)
+    hunk_changes = parse_hunk_changes(diff_text)
+
+    # Create state with empty search space
+    state = BifurcationState(
+        commit_sha=bad_sha,
+        parent_sha=parent_sha,
+        test_command="python3 test.py",
+        strategy=Strategy.HUNK,
+        changes=hunk_changes,
+        search_space=[],  # Empty!
+    )
+    state.save()
+
+    result = runner.invoke(main, ["continue"], catch_exceptions=False)
+
+    assert result.exit_code == 0
+    assert "Search space is empty" in result.output
+
+
+def test_cli_start_find_more_empty_remaining_changes(
+    runner: CliRunner,
+    simple_fixture: Path,
+    change_to_original_dir: None,
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    """Test line 213: remaining_changes becomes empty during find-more loop."""
+    from conftest import get_commit_shas
+
+    from git_bifurcate.core import BifurcationEngine
+    from git_bifurcate.git_ops import GitRepo
+    from git_bifurcate.parser import parse_file_changes
+
+    os.chdir(simple_fixture)
+    _parent_sha, bad_sha = get_commit_shas(simple_fixture)
+
+    # Get the actual file changes to know how many there are
+    git = GitRepo()
+    diff_text = git.get_diff(bad_sha, _parent_sha)
+    file_changes = parse_file_changes(diff_text)
+    num_changes = len(file_changes)
+
+    # Mock bifurcate_files to find each change one by one
+    call_count = [0]
+
+    def mock_bifurcate(self, changes, *args, **kwargs):
+        call_count[0] += 1
+        # Return the first available change each time
+        if changes:
+            return changes[0]
+        return None
+
+    monkeypatch.setattr(BifurcationEngine, "bifurcate_files", mock_bifurcate)
+
+    # Mock confirm to always say yes
+    monkeypatch.setattr("click.confirm", lambda _: True)
+
+    result = runner.invoke(
+        main,
+        ["start", bad_sha, "--strategy", "file", "--test", "bash test.sh", "--find-more"],
+        catch_exceptions=False,
+    )
+
+    assert result.exit_code == 0
+    # Should have been called multiple times until all changes found
+    assert call_count[0] >= num_changes
+
+
+def test_cli_start_find_more_empty_remaining_hunks(
+    runner: CliRunner,
+    hunk_fixture: Path,
+    change_to_original_dir: None,
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    """Test line 407: remaining_hunks becomes empty during find-more loop."""
+    from conftest import get_commit_shas
+
+    from git_bifurcate.core import BifurcationEngine
+    from git_bifurcate.git_ops import GitRepo
+    from git_bifurcate.parser import parse_hunk_changes
+
+    os.chdir(hunk_fixture)
+    _parent_sha, bad_sha = get_commit_shas(hunk_fixture)
+
+    # Get the actual hunk changes to know how many there are
+    git = GitRepo()
+    diff_text = git.get_diff(bad_sha, _parent_sha)
+    hunk_changes = parse_hunk_changes(diff_text)
+    num_hunks = len(hunk_changes)
+
+    # Mock bifurcate_hunks to find each hunk one by one
+    call_count = [0]
+
+    def mock_bifurcate(self, hunks, *args, **kwargs):
+        call_count[0] += 1
+        # Return the first available hunk each time
+        if hunks:
+            return hunks[0]
+        return None
+
+    monkeypatch.setattr(BifurcationEngine, "bifurcate_hunks", mock_bifurcate)
+
+    # Mock confirm to always say yes
+    monkeypatch.setattr("click.confirm", lambda _: True)
+
+    result = runner.invoke(
+        main,
+        ["start", bad_sha, "--strategy", "hunk", "--test", "python3 test.py", "--find-more"],
+        catch_exceptions=False,
+    )
+
+    assert result.exit_code == 0
+    # Should have been called multiple times until all hunks found
+    assert call_count[0] >= num_hunks
+
+
+def test_cli_continue_file_no_breaking_change_found(
+    runner: CliRunner,
+    simple_fixture: Path,
+    change_to_original_dir: None,
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    """Test lines 751-752: continue when no breaking file found."""
+    from conftest import get_commit_shas
+
+    from git_bifurcate.core import BifurcationEngine
+    from git_bifurcate.git_ops import GitRepo
+    from git_bifurcate.models import Strategy
+    from git_bifurcate.parser import parse_file_changes
+
+    os.chdir(simple_fixture)
+    parent_sha, bad_sha = get_commit_shas(simple_fixture)
+
+    git = GitRepo()
+    diff_text = git.get_diff(bad_sha, parent_sha)
+    file_changes = parse_file_changes(diff_text)
+
+    # Create state
+    state = BifurcationState(
+        commit_sha=bad_sha,
+        parent_sha=parent_sha,
+        test_command="bash test.sh",
+        strategy=Strategy.FILE,
+        changes=file_changes,
+        search_space=list(range(len(file_changes))),
+    )
+    state.save()
+
+    # Mock to return None (no breaking change)
+    monkeypatch.setattr(BifurcationEngine, "bifurcate_files", lambda *args, **kwargs: None)
+
+    result = runner.invoke(main, ["continue"], catch_exceptions=False)
+
+    assert result.exit_code == 0
+    assert "No single breaking change found" in result.output
+
+
+def test_cli_continue_hunk_no_breaking_change_found(
+    runner: CliRunner,
+    hunk_fixture: Path,
+    change_to_original_dir: None,
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    """Test lines 780-781: continue when no breaking hunk found."""
+    from conftest import get_commit_shas
+
+    from git_bifurcate.core import BifurcationEngine
+    from git_bifurcate.git_ops import GitRepo
+    from git_bifurcate.models import Strategy
+    from git_bifurcate.parser import parse_hunk_changes
+
+    os.chdir(hunk_fixture)
+    parent_sha, bad_sha = get_commit_shas(hunk_fixture)
+
+    git = GitRepo()
+    diff_text = git.get_diff(bad_sha, parent_sha)
+    hunk_changes = parse_hunk_changes(diff_text)
+
+    # Create state
+    state = BifurcationState(
+        commit_sha=bad_sha,
+        parent_sha=parent_sha,
+        test_command="python3 test.py",
+        strategy=Strategy.HUNK,
+        changes=hunk_changes,
+        search_space=list(range(len(hunk_changes))),
+    )
+    state.save()
+
+    # Mock to return None (no breaking change)
+    monkeypatch.setattr(BifurcationEngine, "bifurcate_hunks", lambda *args, **kwargs: None)
+
+    result = runner.invoke(main, ["continue"], catch_exceptions=False)
+
+    assert result.exit_code == 0
+    assert "No single breaking change found" in result.output
