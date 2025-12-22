@@ -7,9 +7,9 @@ to optimize bifurcation and handle dependencies efficiently.
 from __future__ import annotations
 
 from collections import deque
-from typing import TypeVar
 
 from git_bifurcate.models import FileChange, HunkChange
+
 
 class DependencyGraph:
     """Represents a dependency graph for changes."""
