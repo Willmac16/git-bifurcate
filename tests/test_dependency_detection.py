@@ -108,9 +108,7 @@ class TestBasicDependencyDetection:
         # Together they work
         assert engine._test_changes(changes, "base", [0, 1]) == CommandResult.PASS
 
-    def test_transitive_dependency(
-        self, mock_git: MagicMock, mock_test_runner: MagicMock
-    ) -> None:
+    def test_transitive_dependency(self, mock_git: MagicMock, mock_test_runner: MagicMock) -> None:
         """Test A->B->C dependency chain."""
         changes = [
             FileChange("0", "base.py", "added", "diff0", ChangeStatus.UNKNOWN),  # Base
@@ -681,9 +679,7 @@ class TestEdgeCases:
 class TestPerformance:
     """Performance and efficiency tests."""
 
-    def test_large_dependency_chain(
-        self, mock_git: MagicMock, mock_test_runner: MagicMock
-    ) -> None:
+    def test_large_dependency_chain(self, mock_git: MagicMock, mock_test_runner: MagicMock) -> None:
         """Test performance with long dependency chain."""
         # Create chain: 0->1->2->...->9
         changes = [
@@ -712,9 +708,7 @@ class TestPerformance:
         assert engine._test_changes(changes, "base", list(range(5))) == CommandResult.PASS
         assert engine._test_changes(changes, "base", list(range(10))) == CommandResult.PASS
 
-    def test_wide_dependency_graph(
-        self, mock_git: MagicMock, mock_test_runner: MagicMock
-    ) -> None:
+    def test_wide_dependency_graph(self, mock_git: MagicMock, mock_test_runner: MagicMock) -> None:
         """Test with many files depending on a single base file."""
         # File 0 is base, files 1-9 all depend on it
         changes = [

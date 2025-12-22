@@ -63,9 +63,7 @@ class TestCommitBisector:
 
     def test_get_commit_info(self, mock_git: MagicMock, mock_test_runner: MagicMock) -> None:
         """Test getting commit information."""
-        mock_git.repo.git.show.return_value = (
-            "abc123\ndef456\nTest commit\nJohn Doe\n1234567890"
-        )
+        mock_git.repo.git.show.return_value = "abc123\ndef456\nTest commit\nJohn Doe\n1234567890"
 
         bisector = CommitBisector(mock_git, mock_test_runner)
         info = bisector.get_commit_info("abc123")
@@ -88,9 +86,7 @@ class TestCommitBisector:
         assert info.sha == "abc123"
         assert info.parent_sha is None
 
-    def test_get_submodule_commits(
-        self, mock_git: MagicMock, mock_test_runner: MagicMock
-    ) -> None:
+    def test_get_submodule_commits(self, mock_git: MagicMock, mock_test_runner: MagicMock) -> None:
         """Test getting submodule commits."""
         mock_git.repo.git.show.return_value = "[submodule test]\n\tpath = sub/path"
         mock_git.repo.git.ls_tree.return_value = "160000 commit ghi789\tsub/path"
@@ -121,9 +117,7 @@ class TestCommitBisector:
         assert commits == ["commit1", "commit2", "commit3"]
         mock_git.repo.git.rev_list.assert_called_once_with("good..bad", reverse=True)
 
-    def test_get_commit_range_empty(
-        self, mock_git: MagicMock, mock_test_runner: MagicMock
-    ) -> None:
+    def test_get_commit_range_empty(self, mock_git: MagicMock, mock_test_runner: MagicMock) -> None:
         """Test getting empty commit range."""
         mock_git.repo.git.rev_list.return_value = ""
 
@@ -132,9 +126,7 @@ class TestCommitBisector:
 
         assert commits == []
 
-    def test_get_commit_range_error(
-        self, mock_git: MagicMock, mock_test_runner: MagicMock
-    ) -> None:
+    def test_get_commit_range_error(self, mock_git: MagicMock, mock_test_runner: MagicMock) -> None:
         """Test error getting commit range."""
         mock_git.repo.git.rev_list.side_effect = Exception("Error")
 
@@ -143,9 +135,7 @@ class TestCommitBisector:
 
         assert commits == []
 
-    def test_test_commit_success(
-        self, mock_git: MagicMock, mock_test_runner: MagicMock
-    ) -> None:
+    def test_test_commit_success(self, mock_git: MagicMock, mock_test_runner: MagicMock) -> None:
         """Test testing a commit successfully."""
         mock_test_runner.run.return_value = CommandResult.PASS
 
@@ -156,9 +146,7 @@ class TestCommitBisector:
         mock_git.checkout.assert_called_once_with("abc123")
         mock_test_runner.run.assert_called_once()
 
-    def test_test_commit_failure(
-        self, mock_git: MagicMock, mock_test_runner: MagicMock
-    ) -> None:
+    def test_test_commit_failure(self, mock_git: MagicMock, mock_test_runner: MagicMock) -> None:
         """Test testing a commit that fails."""
         mock_test_runner.run.return_value = CommandResult.FAIL
 
@@ -187,9 +175,7 @@ class TestCommitBisector:
         with patch("subprocess.run"), patch("pathlib.Path.exists", return_value=True):
             bisector._update_submodules("abc123", verbose=False)
 
-            mock_git.repo.git.submodule.assert_called_once_with(
-                "update", "--init", "--recursive"
-            )
+            mock_git.repo.git.submodule.assert_called_once_with("update", "--init", "--recursive")
 
     def test_update_submodules_error(
         self, mock_git: MagicMock, mock_test_runner: MagicMock
@@ -235,9 +221,7 @@ class TestCommitBisector:
     ) -> None:
         """Test bisecting to find single bad commit."""
         mock_git.repo.git.rev_list.return_value = "commit1"
-        mock_git.repo.git.show.return_value = (
-            "commit1\ncommit0\nBad commit\nJohn Doe\n1234567890"
-        )
+        mock_git.repo.git.show.return_value = "commit1\ncommit0\nBad commit\nJohn Doe\n1234567890"
         mock_test_runner.run.return_value = CommandResult.FAIL
 
         bisector = CommitBisector(mock_git, mock_test_runner)
@@ -251,9 +235,7 @@ class TestCommitBisector:
         """Test bisecting when some commits are skipped."""
         commits = ["commit1", "commit2", "commit3"]
         mock_git.repo.git.rev_list.return_value = "\n".join(commits)
-        mock_git.repo.git.show.return_value = (
-            "commit3\ncommit2\nFinal commit\nJohn Doe\n1234567890"
-        )
+        mock_git.repo.git.show.return_value = "commit3\ncommit2\nFinal commit\nJohn Doe\n1234567890"
 
         results = [CommandResult.SKIP, CommandResult.FAIL]
         mock_test_runner.run.side_effect = results
@@ -274,7 +256,6 @@ class TestCommitBisector:
 
         assert stats["total_commits"] == 4
         assert stats["estimated_iterations"] == 3  # log2(4) + 1
-
 
     def test_bisect_commits_verbose_output(
         self, mock_git: MagicMock, mock_test_runner: MagicMock, capsys: pytest.CaptureFixture
@@ -324,9 +305,7 @@ class TestCommitBisector:
         """Test bisecting with PASS result and verbose output."""
         commits = ["commit1", "commit2", "commit3"]
         mock_git.repo.git.rev_list.return_value = "\n".join(commits)
-        mock_git.repo.git.show.return_value = (
-            "commit3\ncommit2\nLast commit\nJohn Doe\n1234567890"
-        )
+        mock_git.repo.git.show.return_value = "commit3\ncommit2\nLast commit\nJohn Doe\n1234567890"
 
         # First test PASS, second FAIL
         results = [CommandResult.PASS, CommandResult.FAIL]
@@ -377,8 +356,10 @@ class TestCommitBisector:
 
         bisector = CommitBisector(mock_git, mock_test_runner)
 
-        with patch("subprocess.run", side_effect=Exception("Checkout failed")), \
-             patch("pathlib.Path.exists", return_value=True):
+        with (
+            patch("subprocess.run", side_effect=Exception("Checkout failed")),
+            patch("pathlib.Path.exists", return_value=True),
+        ):
             bisector._update_submodules("abc123", verbose=True)
 
             captured = capsys.readouterr()
@@ -397,9 +378,7 @@ class TestCommitBisector:
         assert "Warming caches" in captured.out
         assert "Warmed cache for 3 commits" in captured.out
 
-    def test_warm_caches_diff_error(
-        self, mock_git: MagicMock, mock_test_runner: MagicMock
-    ) -> None:
+    def test_warm_caches_diff_error(self, mock_git: MagicMock, mock_test_runner: MagicMock) -> None:
         """Test cache warming with diff errors (should not raise)."""
         commits = ["commit1", "commit2"]
         mock_git.repo.git.diff.side_effect = Exception("Diff error")
@@ -442,9 +421,7 @@ class TestCommitBisector:
         """Test bisecting when search space becomes empty with verbose output."""
         commits = ["commit1", "commit2"]
         mock_git.repo.git.rev_list.return_value = "\n".join(commits)
-        mock_git.repo.git.show.return_value = (
-            "commit1\ncommit0\nCommit\nJohn Doe\n1234567890"
-        )
+        mock_git.repo.git.show.return_value = "commit1\ncommit0\nCommit\nJohn Doe\n1234567890"
 
         # Return PASS to narrow to second half, which will be empty
         # search_space = [0, 1], mid = 1, PASS -> search_space = [1+1:] = []

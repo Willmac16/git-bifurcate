@@ -125,9 +125,7 @@ class CommitBisector:
 
         return submodule_commits
 
-    def bisect_commits(
-        self, good_commit: str, bad_commit: str, verbose: bool = True
-    ) -> str | None:
+    def bisect_commits(self, good_commit: str, bad_commit: str, verbose: bool = True) -> str | None:
         """Perform binary search through commits to find first bad commit.
 
         Args:
@@ -147,7 +145,9 @@ class CommitBisector:
             return None
 
         if verbose:
-            click.echo(f"Bisecting {len(commits)} commits between {good_commit[:8]} and {bad_commit[:8]}")
+            click.echo(
+                f"Bisecting {len(commits)} commits between {good_commit[:8]} and {bad_commit[:8]}"
+            )
 
         # Warm caches if enabled
         if not self.cache_warmed:
@@ -178,7 +178,7 @@ class CommitBisector:
 
             if result == CommandResult.FAIL:
                 # Bug is in first half (including this commit)
-                search_space = search_space[:mid + 1]
+                search_space = search_space[: mid + 1]
                 if verbose:
                     click.echo("  Result: FAIL - narrowing to earlier commits")
             elif result == CommandResult.PASS:
@@ -219,9 +219,7 @@ class CommitBisector:
         """
         try:
             # Get commits from good to bad (exclusive of good, inclusive of bad)
-            result = self.git.repo.git.rev_list(
-                f"{good_commit}..{bad_commit}", reverse=True
-            )
+            result = self.git.repo.git.rev_list(f"{good_commit}..{bad_commit}", reverse=True)
             if result:
                 return result.split("\n")
             return []

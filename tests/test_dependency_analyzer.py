@@ -180,7 +180,9 @@ class TestDependencyAnalyzer:
         analyzer._extract_python_symbols(change)
 
         # Should have attempted to extract symbols
-        assert "broken.py" in analyzer.symbol_definitions or "broken.py" in analyzer.symbol_references
+        assert (
+            "broken.py" in analyzer.symbol_definitions or "broken.py" in analyzer.symbol_references
+        )
 
     def test_contextual_hunk_dependencies(self) -> None:
         """Test detecting dependencies based on line proximity."""
