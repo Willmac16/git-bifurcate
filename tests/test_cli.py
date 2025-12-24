@@ -1830,8 +1830,6 @@ def test_cli_start_with_path_filter_file_strategy(
     assert "module2.py" in result.output
 
 
-
-
 def test_cli_start_with_path_filter_hunk_strategy(
     runner: CliRunner, hunk_fixture: Path, change_to_original_dir: None
 ) -> None:
@@ -1860,5 +1858,3 @@ def test_cli_start_with_path_filter_hunk_strategy(
     assert result.exit_code == 0
     assert "Filtered to" in result.output
     assert "calculator.py" in result.output
-
-
