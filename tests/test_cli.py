@@ -1710,3 +1710,155 @@ def test_cli_bisect_with_submodules_detected(
 
     assert result.exit_code == 0
     assert "Note: Repository contains submodules" in result.output
+
+
+def test_matches_path_filter() -> None:
+    """Test the _matches_path_filter helper function."""
+    from git_bifurcate.cli import _matches_path_filter
+
+    # Empty filter means match all
+    assert _matches_path_filter("any/file.py", ())
+
+    # Exact file match
+    assert _matches_path_filter("src/module.py", ("src/module.py",))
+    assert not _matches_path_filter("src/other.py", ("src/module.py",))
+
+    # Directory match
+    assert _matches_path_filter("src/module.py", ("src",))
+    assert _matches_path_filter("src/sub/file.py", ("src",))
+    assert not _matches_path_filter("other/file.py", ("src",))
+
+    # Directory with trailing slash
+    assert _matches_path_filter("src/module.py", ("src/",))
+    assert _matches_path_filter("src/sub/file.py", ("src/",))
+
+    # Multiple paths
+    assert _matches_path_filter("src/module.py", ("src", "lib"))
+    assert _matches_path_filter("lib/helper.py", ("src", "lib"))
+    assert not _matches_path_filter("other/file.py", ("src", "lib"))
+
+    # Edge case: file at root
+    assert _matches_path_filter("README.md", ("README.md",))
+    assert not _matches_path_filter("README.md", ("src",))
+
+
+def test_filter_changes_by_paths() -> None:
+    """Test the _filter_changes_by_paths helper function."""
+    from git_bifurcate.cli import _filter_changes_by_paths
+
+    changes = [
+        FileChange("0", "src/module.py", "modified", "diff", status=ChangeStatus.UNKNOWN),
+        FileChange("1", "lib/helper.py", "modified", "diff", status=ChangeStatus.UNKNOWN),
+        FileChange("2", "tests/test_module.py", "modified", "diff", status=ChangeStatus.UNKNOWN),
+        FileChange("3", "README.md", "modified", "diff", status=ChangeStatus.UNKNOWN),
+    ]
+
+    # No filter returns all
+    result = _filter_changes_by_paths(changes, ())
+    assert len(result) == 4
+
+    # Filter by exact file
+    result = _filter_changes_by_paths(changes, ("src/module.py",))
+    assert len(result) == 1
+    assert result[0].file_path == "src/module.py"
+
+    # Filter by directory
+    result = _filter_changes_by_paths(changes, ("src",))
+    assert len(result) == 1
+    assert result[0].file_path == "src/module.py"
+
+    # Filter by multiple paths
+    result = _filter_changes_by_paths(changes, ("src", "lib"))
+    assert len(result) == 2
+    assert {r.file_path for r in result} == {"src/module.py", "lib/helper.py"}
+
+    # Filter with no matches
+    result = _filter_changes_by_paths(changes, ("nonexistent",))
+    assert len(result) == 0
+
+    # Test with HunkChange objects
+    hunk_changes = [
+        HunkChange(
+            "0",
+            "src/module.py",
+            1,
+            10,
+            1,
+            10,
+            1,
+            10,
+            "diff",
+            status=ChangeStatus.UNKNOWN,
+        ),
+        HunkChange(
+            "1",
+            "lib/helper.py",
+            1,
+            10,
+            1,
+            10,
+            1,
+            10,
+            "diff",
+            status=ChangeStatus.UNKNOWN,
+        ),
+    ]
+
+    result = _filter_changes_by_paths(hunk_changes, ("src",))
+    assert len(result) == 1
+    assert result[0].file_path == "src/module.py"
+
+
+def test_cli_start_with_path_filter_file_strategy(
+    runner: CliRunner, simple_fixture: Path, change_to_original_dir: None
+) -> None:
+    """Test path filtering with file strategy."""
+    from conftest import get_commit_shas
+
+    os.chdir(simple_fixture)
+    _parent_sha, bad_sha = get_commit_shas(simple_fixture)
+
+    # Filter to specific file
+    result = runner.invoke(
+        main,
+        ["start", bad_sha, "--strategy", "file", "--test", "bash test.sh", "--", "module2.py"],
+        catch_exceptions=False,
+    )
+
+    assert result.exit_code == 0
+    assert "Filtered to" in result.output
+    assert "module2.py" in result.output
+
+
+
+
+def test_cli_start_with_path_filter_hunk_strategy(
+    runner: CliRunner, hunk_fixture: Path, change_to_original_dir: None
+) -> None:
+    """Test path filtering with hunk strategy."""
+    from conftest import get_commit_shas
+
+    os.chdir(hunk_fixture)
+    _parent_sha, bad_sha = get_commit_shas(hunk_fixture)
+
+    # Filter to specific file
+    result = runner.invoke(
+        main,
+        [
+            "start",
+            bad_sha,
+            "--strategy",
+            "hunk",
+            "--test",
+            "python3 test.py",
+            "--",
+            "calculator.py",
+        ],
+        catch_exceptions=False,
+    )
+
+    assert result.exit_code == 0
+    assert "Filtered to" in result.output
+    assert "calculator.py" in result.output
+
+
