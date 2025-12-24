@@ -47,9 +47,9 @@ def _matches_path_filter(file_path: str, filter_paths: tuple[str, ...]) -> bool:
     return False
 
 
-def _filter_changes_by_paths(
-    changes: list[FileChange] | list[HunkChange], paths: tuple[str, ...]
-) -> list[FileChange] | list[HunkChange]:
+def _filter_changes_by_paths[ChangeT: (FileChange, HunkChange)](
+    changes: list[ChangeT], paths: tuple[str, ...]
+) -> list[ChangeT]:
     """Filter changes to only include those matching the specified paths.
 
     Args:
@@ -178,7 +178,7 @@ def start(
 
             # Apply path filtering if specified
             if paths:
-                file_changes = cast(list[FileChange], _filter_changes_by_paths(file_changes, paths))
+                file_changes = _filter_changes_by_paths(file_changes, paths)
                 click.echo(f"Filtered to {len(file_changes)} changes matching: {', '.join(paths)}")
 
             if not file_changes:
@@ -374,7 +374,7 @@ def start(
 
             # Apply path filtering if specified
             if paths:
-                hunk_changes = cast(list[HunkChange], _filter_changes_by_paths(hunk_changes, paths))
+                hunk_changes = _filter_changes_by_paths(hunk_changes, paths)
                 click.echo(f"Filtered to {len(hunk_changes)} changes matching: {', '.join(paths)}")
 
             if not hunk_changes:
