@@ -560,9 +560,242 @@ def start(
                 git.reset_hard(commit_sha)
                 BifurcationState.delete()
         else:  # HYBRID
-            click.echo("Error: Hybrid strategy not yet implemented")
-            click.echo("Please use --strategy=file or --strategy=hunk")
-            sys.exit(1)
+            file_changes = parse_file_changes(diff_text)
+            click.echo(f"Found {len(file_changes)} file-level changes")
+
+            # Apply path filtering if specified
+            if paths:
+                file_changes = _filter_changes_by_paths(file_changes, paths)
+                click.echo(f"Filtered to {len(file_changes)} changes matching: {', '.join(paths)}")
+
+            if not file_changes:
+                click.echo("Error: No changes found in commit")
+                sys.exit(1)
+
+            # Analyze dependencies if requested
+            if analyze_deps:
+                click.echo("Analyzing dependencies between changes...")
+                apply_dependency_analysis(file_changes)
+                dep_count = sum(len(c.dependencies) for c in file_changes)
+                click.echo(f"Found {dep_count} dependencies")
+
+            # Display changes
+            click.echo("\nChanges to bifurcate:")
+            for i, file_change in enumerate(file_changes):
+                deps_info = (
+                    f" (depends on: {file_change.dependencies})" if file_change.dependencies else ""
+                )
+                click.echo(
+                    f"  [{i}] {file_change.file_path} ({file_change.change_type}){deps_info}"
+                )
+            click.echo()
+
+            # First, verify that all changes together reproduce the failure
+            click.echo("Verifying that all changes together fail the test...")
+            test_runner = CommandRunner(test)
+            engine = BifurcationEngine(git, test_runner)
+
+            all_indices = list(range(len(file_changes)))
+            result = engine._test_changes(file_changes, parent_sha, all_indices)
+
+            if result != CommandResult.FAIL:
+                click.echo(
+                    f"\nError: Expected test to FAIL with all changes, but got {result.value}"
+                )
+                click.echo("The commit you're bifurcating should fail tests.")
+                click.echo("Please verify:")
+                click.echo(f"  1. Tests pass at parent commit: {parent_sha[:8]}")
+                click.echo(f"  2. Tests fail at target commit: {commit_sha[:8]}")
+                click.echo(f"  3. Test command is correct: {test}")
+                sys.exit(1)
+
+            click.echo("✓ Confirmed: All changes together fail the test")
+            click.echo()
+
+            # Verify that no changes passes
+            click.echo("Verifying that parent commit passes the test...")
+            result = engine._test_changes(file_changes, parent_sha, [])
+
+            if result != CommandResult.PASS:
+                click.echo(
+                    f"\nError: Expected test to PASS with no changes, but got {result.value}"
+                )
+                click.echo("The parent commit should pass tests.")
+                sys.exit(1)
+
+            click.echo("✓ Confirmed: No changes (parent commit) passes the test")
+            click.echo()
+
+            # Create initial state
+            state = BifurcationState(
+                commit_sha=commit_sha,
+                parent_sha=parent_sha,
+                test_command=test,
+                strategy=strategy_enum,
+                changes=cast(list[FileChange | HunkChange], file_changes),
+                search_space=list(range(len(file_changes))),
+            )
+            state.save()
+
+            # Start hybrid bifurcation
+            click.echo()
+            click.echo("=" * 60)
+            click.echo("HYBRID STRATEGY: File-level → Hunk-level")
+            click.echo("=" * 60)
+            click.echo()
+
+            breaking_results = []
+            search_indices = list(range(len(file_changes)))
+
+            while True:
+                # Create new engine for each search to reset state
+                engine = BifurcationEngine(git, test_runner)
+
+                # Filter to only search remaining indices
+                remaining_changes = [file_changes[i] for i in search_indices]
+
+                result = engine.bifurcate_hybrid(
+                    remaining_changes, parent_sha, commit_sha, diff_text, verbose=True
+                )
+
+                if result:
+                    # Result can be FileChange or tuple[FileChange, HunkChange]
+                    if isinstance(result, tuple):
+                        breaking_file, breaking_hunk = result
+                        breaking_file = cast(FileChange, breaking_file)
+                        breaking_hunk = cast(HunkChange, breaking_hunk)
+                        # Find original index
+                        original_idx = next(
+                            i for i in search_indices if file_changes[i].id == breaking_file.id
+                        )
+                        breaking_results.append((original_idx, breaking_file, breaking_hunk))
+
+                        click.echo()
+                        click.echo("=" * 60)
+                        if find_more:
+                            click.echo(f"BREAKING CHANGE #{len(breaking_results)} FOUND!")
+                        else:
+                            click.echo("BREAKING CHANGE FOUND!")
+                        click.echo("=" * 60)
+                        click.echo()
+                        click.echo(f"File: {breaking_file.file_path}")
+                        click.echo(f"Type: {breaking_file.change_type}")
+                        click.echo(f"Hunk: Lines {breaking_hunk.start_line}-{breaking_hunk.end_line}")
+                        click.echo()
+                        click.echo("Diff content:")
+                        click.echo("-" * 60)
+                        click.echo(breaking_hunk.diff_content)
+                        click.echo("-" * 60)
+                        click.echo()
+
+                        # Remove from search space
+                        search_indices.remove(original_idx)
+                    else:
+                        # Only file-level result
+                        breaking_file = cast(FileChange, result)
+                        original_idx = next(
+                            i for i in search_indices if file_changes[i].id == breaking_file.id
+                        )
+                        breaking_results.append((original_idx, breaking_file, None))
+
+                        click.echo()
+                        click.echo("=" * 60)
+                        if find_more:
+                            click.echo(f"BREAKING CHANGE #{len(breaking_results)} FOUND!")
+                        else:
+                            click.echo("BREAKING CHANGE FOUND!")
+                        click.echo("=" * 60)
+                        click.echo()
+                        click.echo(f"File: {breaking_file.file_path}")
+                        click.echo(f"Type: {breaking_file.change_type}")
+                        click.echo()
+                        click.echo("Diff content:")
+                        click.echo("-" * 60)
+                        click.echo(breaking_file.diff_content)
+                        click.echo("-" * 60)
+                        click.echo()
+
+                        if breaking_file.change_type == "submodule":
+                            _analyze_submodule_drift(
+                                git, test_runner, parent_sha, file_changes, breaking_file, commit_sha
+                            )
+
+                        # Remove from search space
+                        search_indices.remove(original_idx)
+
+                    # Ask if user wants to find more
+                    if find_more and search_indices:
+                        if not click.confirm("\nContinue searching for more breaking changes?"):
+                            break
+                    else:
+                        break
+                else:
+                    # No more breaking changes found
+                    break
+
+            # Show summary
+            if breaking_results:
+                if find_more and len(breaking_results) > 1:
+                    click.echo()
+                    click.echo("=" * 60)
+                    click.echo(f"FOUND {len(breaking_results)} BREAKING CHANGE(S)")
+                    click.echo("=" * 60)
+                    for idx, (orig_idx, bf, bh) in enumerate(breaking_results, 1):
+                        if bh:
+                            click.echo(
+                                f"\n{idx}. [{orig_idx}] {bf.file_path}:{bh.start_line}-{bh.end_line}"
+                            )
+                        else:
+                            click.echo(f"\n{idx}. [{orig_idx}] {bf.file_path} ({bf.change_type})")
+
+                click.echo()
+                # Show stats
+                click.echo()
+                stats = engine.get_stats()
+                click.echo("Statistics:")
+                click.echo(f"  Total tests run: {stats['tests_run']}")
+                click.echo(f"  Passed: {stats['passed']}")
+                click.echo(f"  Failed: {stats['failed']}")
+                click.echo(f"  Skipped: {stats['skipped']}")
+                click.echo(f"  Errors: {stats['errors']}")
+                if "avg_test_time" in stats:
+                    click.echo(
+                        f"  Average test time: {BifurcationEngine.format_time(stats['avg_test_time'])}"
+                    )
+                    click.echo(
+                        f"  Total time: {BifurcationEngine.format_time(stats['total_test_time'])}"
+                    )
+
+                # Clean up
+                click.echo()
+                click.echo("Cleaning up...")
+                git.reset_hard(commit_sha)
+                BifurcationState.delete()
+                click.echo("✓ Done")
+            else:
+                click.echo()
+                click.echo("=" * 60)
+                click.echo("NO SINGLE BREAKING CHANGE FOUND")
+                click.echo("=" * 60)
+                click.echo()
+                click.echo("This could mean:")
+                click.echo("  1. Multiple changes interact to cause the failure")
+                click.echo("  2. Dependency issues between changes")
+                click.echo("  3. The test is nondeterministic")
+                click.echo()
+
+                _analyze_submodule_interactions(
+                    git, test_runner, parent_sha, file_changes, commit_sha
+                )
+
+                # Show stats
+                stats = engine.get_stats()
+                click.echo("Statistics:")
+                click.echo(f"  Total tests run: {stats['tests_run']}")
+
+                # Clean up
+                git.reset_hard(commit_sha)
+                BifurcationState.delete()
 
     except FileNotFoundError as e:
         click.echo(f"Error: {e}")

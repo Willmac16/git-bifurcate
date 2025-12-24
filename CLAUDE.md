@@ -30,7 +30,7 @@ This file provides guidance to Claude Code (claude.ai/code) when working with co
 **Strategy**: Granularity level for search:
 - `file`: Binary search across files only (default, implemented ✅)
 - `hunk`: Binary search across individual hunks (implemented ✅)
-- `hybrid`: File-level first, then drill down to hunk-level (planned, not implemented ❌)
+- `hybrid`: File-level first, then drill down to hunk-level (implemented ✅)
 
 **State**: Persistent bifurcation state saved to `.git/bifurcate-state.json` for resumption
 
@@ -107,17 +107,20 @@ Enabled with `--analyze-deps` flag.
 
 **✅ Phase 1 - MVP**: File-level bifurcation, automated mode, state persistence - COMPLETE
 
-**✅ Phase 2 - Hunk Level**: Parse hunks, hunk-level bifurcation - COMPLETE
-- ❌ Hybrid strategy - NOT YET IMPLEMENTED
+**✅ Phase 2 - Hunk Level**: Parse hunks, hunk-level bifurcation, hybrid strategy - COMPLETE
 
 **✅ Phase 3 - Robustness**: Multi-language dependency detection, skip problematic combinations - COMPLETE
-- ❌ Manual mode - NOT YET IMPLEMENTED
+- ❌ Manual mode - NOT YET IMPLEMENTED (Phase 6)
 
 **✅ Phase 4 - Advanced Features**: Multiple breaking changes (--find-more), commit bisection, path filtering, submodule support - COMPLETE
-- ❌ Parallel testing - NOT YET IMPLEMENTED
-- ❌ GUI/TUI - NOT YET IMPLEMENTED
 
 **✅ Phase 5 - Production Quality**: 99.9% test coverage, CI/CD, linting, type checking - COMPLETE
+
+**🚧 Phase 6 - Advanced UX** (In Progress):
+- ✅ Hybrid strategy (file → hunk drill-down)
+- ❌ Manual mode - Planned
+- ❌ Parallel testing with worktrees - Planned
+- ❌ GUI/TUI interface - Planned
 
 ## Critical Design Decisions
 

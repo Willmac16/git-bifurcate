@@ -16,11 +16,10 @@ When `git bisect` identifies a bad commit, developers face a new problem: the co
 
 **Binary Search on Changes**: Just as `git bisect` performs binary search across commits, `git bifurcate` performs binary search across individual changes (files and hunks) within a commit.
 
-**Granularity Levels** (Implemented):
+**Granularity Levels** (All Implemented):
 1. **File-level** (default): Test with subsets of changed files - fast but less precise
 2. **Hunk-level**: Test with subsets of hunks within files - slower but maximally precise
-
-**Note:** Hybrid strategy (file-level then hunk-level drill-down) is planned but not yet implemented.
+3. **Hybrid**: File-level first, then drill down to hunk-level - best of both worlds
 
 ## User Workflow
 
@@ -268,7 +267,7 @@ If commit has multiple independent breaking changes:
 - **Phase 2: Hunk-Level Support**
   - ✅ Parse hunks from diff
   - ✅ Hunk-level bifurcation
-  - ❌ Hybrid strategy (planned)
+  - ✅ Hybrid strategy (file → hunk drill-down)
 
 - **Phase 3: Robustness**
   - ✅ Handle build failures gracefully

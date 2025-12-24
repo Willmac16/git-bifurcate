@@ -962,3 +962,287 @@ def test_get_stats_with_timing(mock_git: MagicMock, mock_test_runner: MagicMock)
     assert stats["skipped"] == 1
     assert stats["avg_test_time"] == 2.0
     assert stats["total_test_time"] == 6.0
+
+def test_bifurcate_hybrid_single_file_single_hunk(
+    mock_git: MagicMock, mock_test_runner: MagicMock
+) -> None:
+    """Test hybrid bifurcation when file has only one hunk."""
+    changes = [
+        FileChange("0", "file1.py", "modified", "diff1", ChangeStatus.UNKNOWN),
+        FileChange("1", "file2.py", "modified", "diff2", ChangeStatus.UNKNOWN),
+    ]
+
+    diff_text = """diff --git a/file1.py b/file1.py
+index abc..def 100644
+--- a/file1.py
++++ b/file1.py
+@@ -1,3 +1,3 @@
+ def foo():
+-    return 1
++    return 2
+diff --git a/file2.py b/file2.py
+index xyz..uvw 100644
+--- a/file2.py
++++ b/file2.py
+@@ -1,3 +1,3 @@
+ def bar():
+-    return 3
++    return 4
+"""
+
+    engine = BifurcationEngine(mock_git, mock_test_runner)
+
+    # File-level: file1 fails
+    mock_git.apply_changes.return_value = True
+    mock_test_runner.run.side_effect = [CommandResult.FAIL]  # file1 fails
+
+    result = engine.bifurcate_hybrid(changes, "base", "bad", diff_text, verbose=False)
+
+    assert result is not None
+    assert isinstance(result, tuple)
+    file_change, hunk_change = result
+    assert file_change.file_path == "file1.py"
+    assert hunk_change.file_path == "file1.py"
+
+
+def test_bifurcate_hybrid_multi_hunk_drilldown(
+    mock_git: MagicMock, mock_test_runner: MagicMock, capsys: pytest.CaptureFixture[str]
+) -> None:
+    """Test hybrid bifurcation drills down to specific hunk."""
+    changes = [
+        FileChange("0", "file1.py", "modified", "diff1", ChangeStatus.UNKNOWN),
+        FileChange("1", "file2.py", "modified", "diff2", ChangeStatus.UNKNOWN),
+    ]
+
+    diff_text = """diff --git a/file1.py b/file1.py
+index abc..def 100644
+--- a/file1.py
++++ b/file1.py
+@@ -1,3 +1,3 @@
+ def foo():
+-    return 1
++    return 2
+@@ -10,3 +10,3 @@
+ def bar():
+-    return 3
++    return 4
+diff --git a/file2.py b/file2.py
+index xyz..uvw 100644
+--- a/file2.py
++++ b/file2.py
+@@ -1,3 +1,3 @@
+ def baz():
+-    return 5
++    return 6
+"""
+
+    engine = BifurcationEngine(mock_git, mock_test_runner)
+
+    # File-level: file1 fails
+    # Hunk-level: first hunk fails
+    mock_git.apply_changes.return_value = True
+    mock_git.apply_hunk_changes.return_value = True
+    mock_test_runner.run.side_effect = [
+        CommandResult.FAIL,  # file1 fails
+        CommandResult.FAIL,  # first hunk fails
+    ]
+
+    result = engine.bifurcate_hybrid(changes, "base", "bad", diff_text, verbose=True)
+
+    assert result is not None
+    assert isinstance(result, tuple)
+    file_change, hunk_change = result
+    assert file_change.file_path == "file1.py"
+    assert hunk_change.file_path == "file1.py"
+    assert hunk_change.start_line == 1
+
+    # Check verbose output
+    captured = capsys.readouterr()
+    assert "PHASE 1: File-level bifurcation" in captured.out
+    assert "PHASE 2: Hunk-level bifurcation" in captured.out
+
+
+def test_bifurcate_hybrid_no_breaking_file(
+    mock_git: MagicMock, mock_test_runner: MagicMock
+) -> None:
+    """Test hybrid bifurcation when no breaking file found."""
+    changes = [
+        FileChange("0", "file1.py", "modified", "diff1", ChangeStatus.UNKNOWN),
+        FileChange("1", "file2.py", "modified", "diff2", ChangeStatus.UNKNOWN),
+    ]
+
+    diff_text = """diff --git a/file1.py b/file1.py
+index abc..def 100644
+--- a/file1.py
++++ b/file1.py
+@@ -1,3 +1,3 @@
+ def foo():
+-    return 1
++    return 2
+"""
+
+    engine = BifurcationEngine(mock_git, mock_test_runner)
+
+    # All pass (interaction effect) - need enough mocks for interaction detection
+    mock_git.apply_changes.return_value = True
+    # Provide enough mock returns for bifurcation + interaction detection
+    mock_test_runner.run.return_value = CommandResult.PASS
+
+    result = engine.bifurcate_hybrid(changes, "base", "bad", diff_text, verbose=False)
+
+    assert result is None
+
+
+def test_bifurcate_hybrid_added_file_no_hunks(
+    mock_git: MagicMock, mock_test_runner: MagicMock, capsys: pytest.CaptureFixture[str]
+) -> None:
+    """Test hybrid bifurcation with added file (no hunks to drill down)."""
+    changes = [
+        FileChange("0", "new_file.py", "added", "diff1", ChangeStatus.UNKNOWN),
+    ]
+
+    diff_text = """diff --git a/new_file.py b/new_file.py
+new file mode 100644
+index 0000000..abc123
+--- /dev/null
++++ b/new_file.py
+@@ -0,0 +1,3 @@
++def new_func():
++    return 42
+"""
+
+    engine = BifurcationEngine(mock_git, mock_test_runner)
+
+    mock_git.apply_changes.return_value = True
+    mock_test_runner.run.side_effect = [CommandResult.FAIL]
+
+    result = engine.bifurcate_hybrid(changes, "base", "bad", diff_text, verbose=True)
+
+    assert result is not None
+    assert isinstance(result, FileChange)
+    assert result.file_path == "new_file.py"
+    assert result.change_type == "added"
+
+    # Check that it explains why it can't drill down
+    captured = capsys.readouterr()
+    assert "cannot drill down to hunks" in captured.out
+
+
+def test_bifurcate_hybrid_submodule_no_hunks(
+    mock_git: MagicMock, mock_test_runner: MagicMock, capsys: pytest.CaptureFixture[str]
+) -> None:
+    """Test hybrid bifurcation with submodule (no hunks to drill down)."""
+    changes = [
+        FileChange(
+            "0",
+            "vendor/lib",
+            "submodule",
+            "diff1",
+            ChangeStatus.UNKNOWN,
+            metadata={"old_sha": "abc123", "new_sha": "def456"},
+        ),
+    ]
+
+    diff_text = """diff --git a/vendor/lib b/vendor/lib
+index abc123..def456 160000
+--- a/vendor/lib
++++ b/vendor/lib
+@@ -1 +1 @@
+-Subproject commit abc123
++Subproject commit def456
+"""
+
+    engine = BifurcationEngine(mock_git, mock_test_runner)
+
+    mock_git.apply_changes.return_value = True
+    mock_test_runner.run.side_effect = [CommandResult.FAIL]
+
+    result = engine.bifurcate_hybrid(changes, "base", "bad", diff_text, verbose=True)
+
+    assert result is not None
+    assert isinstance(result, FileChange)
+    assert result.file_path == "vendor/lib"
+    assert result.change_type == "submodule"
+
+    # Check that it explains why it can't drill down
+    captured = capsys.readouterr()
+    assert "cannot drill down to hunks" in captured.out
+
+
+def test_bifurcate_hybrid_no_hunks_in_file(
+    mock_git: MagicMock, mock_test_runner: MagicMock, capsys: pytest.CaptureFixture[str]
+) -> None:
+    """Test hybrid bifurcation when file has no hunks (edge case)."""
+    changes = [
+        FileChange("0", "file1.py", "modified", "diff1", ChangeStatus.UNKNOWN),
+    ]
+
+    # Diff with no actual hunks (just metadata)
+    diff_text = """diff --git a/file1.py b/file1.py
+index abc..def 100644
+--- a/file1.py
++++ b/file1.py
+"""
+
+    engine = BifurcationEngine(mock_git, mock_test_runner)
+
+    mock_git.apply_changes.return_value = True
+    mock_test_runner.run.side_effect = [CommandResult.FAIL]
+
+    result = engine.bifurcate_hybrid(changes, "base", "bad", diff_text, verbose=True)
+
+    assert result is not None
+    assert isinstance(result, FileChange)
+    assert result.file_path == "file1.py"
+
+    # Check that it returns file-level result
+    captured = capsys.readouterr()
+    assert "No hunks found in file" in captured.out
+
+
+def test_bifurcate_hybrid_hunk_level_fails_to_find(
+    mock_git: MagicMock, mock_test_runner: MagicMock, capsys: pytest.CaptureFixture[str]
+) -> None:
+    """Test hybrid bifurcation when hunk-level finds a breaking hunk successfully."""
+    changes = [
+        FileChange("0", "file1.py", "modified", "diff1", ChangeStatus.UNKNOWN),
+    ]
+
+    diff_text = """diff --git a/file1.py b/file1.py
+index abc..def 100644
+--- a/file1.py
++++ b/file1.py
+@@ -1,3 +1,3 @@
+ def foo():
+-    return 1
++    return 2
+@@ -10,3 +10,3 @@
+ def bar():
+-    return 3
++    return 4
+"""
+
+    engine = BifurcationEngine(mock_git, mock_test_runner)
+
+    mock_git.apply_changes.return_value = True
+    mock_git.apply_hunk_changes.return_value = True
+    # File-level: file1 is the only file, immediately verified and fails
+    # Hunk-level: first hunk fails
+    mock_test_runner.run.side_effect = [
+        CommandResult.FAIL,  # file1 verification (single file)
+        CommandResult.FAIL,  # first hunk fails in hunk-level bifurcation
+    ]
+
+    result = engine.bifurcate_hybrid(changes, "base", "bad", diff_text, verbose=True)
+
+    # Should return tuple with file and hunk when successful
+    assert result is not None
+    assert isinstance(result, tuple)
+    file_change, hunk_change = result
+    assert file_change.file_path == "file1.py"
+    assert hunk_change.file_path == "file1.py"
+    assert hunk_change.start_line == 1
+
+    captured = capsys.readouterr()
+    assert "PHASE 1: File-level bifurcation" in captured.out
+    assert "PHASE 2: Hunk-level bifurcation" in captured.out

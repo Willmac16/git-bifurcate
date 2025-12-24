@@ -624,7 +624,7 @@ def test_cli_start_unexpected_exception(monkeypatch: pytest.MonkeyPatch, runner:
 
 
 def test_cli_start_hybrid_strategy(monkeypatch: pytest.MonkeyPatch, runner: CliRunner) -> None:
-    """Hybrid strategy is not implemented."""
+    """Hybrid strategy works: file-level -> hunk-level bifurcation."""
 
     class FakeGit:
         def __init__(self) -> None:
@@ -637,14 +637,79 @@ def test_cli_start_hybrid_strategy(monkeypatch: pytest.MonkeyPatch, runner: CliR
             return "parent"
 
         def get_diff(self, commit_sha: str, parent_sha: str) -> str:
-            return "diff"
+            # Return a realistic multi-file, multi-hunk diff
+            return """diff --git a/file1.py b/file1.py
+index abc123..def456 100644
+--- a/file1.py
++++ b/file1.py
+@@ -1,3 +1,3 @@
+ def foo():
+-    return 1
++    return 2
+@@ -10,3 +10,3 @@
+ def bar():
+-    return 3
++    return 4
+diff --git a/file2.py b/file2.py
+index xyz789..uvw456 100644
+--- a/file2.py
++++ b/file2.py
+@@ -1,3 +1,3 @@
+ def baz():
+-    return 5
++    return 6
+"""
+
+        def apply_changes(self, changes: list, base: str, use_temp_branch: bool = False) -> bool:
+            return True
+
+        def apply_hunk_changes(
+            self, changes: list, base: str, bad: str, use_temp_branch: bool = False
+        ) -> bool:
+            return True
+
+        def checkout(self, sha: str) -> None:
+            pass
+
+        def reset_hard(self, sha: str) -> None:
+            pass
+
+    class FakeTestRunner:
+        call_count = 0
+
+        def __init__(self, cmd: str) -> None:
+            pass
+
+        def run(self) -> CommandResult:
+            FakeTestRunner.call_count += 1
+            # First test: all changes together = FAIL
+            # Second test: no changes (parent) = PASS
+            # Third test onwards: simulate binary search
+            if FakeTestRunner.call_count == 1:
+                return CommandResult.FAIL
+            elif FakeTestRunner.call_count == 2:
+                return CommandResult.PASS
+            # File-level bifurcation: file1 fails, file2 passes
+            elif FakeTestRunner.call_count == 3:  # file1 only
+                return CommandResult.FAIL
+            # Now hunk-level on file1: first hunk fails, second passes
+            elif FakeTestRunner.call_count == 4:  # first hunk of file1
+                return CommandResult.FAIL
+            else:
+                return CommandResult.PASS
 
     monkeypatch.setattr(BifurcationState, "exists", classmethod(lambda cls: False))
+    monkeypatch.setattr(BifurcationState, "save", lambda self: None)
+    monkeypatch.setattr(BifurcationState, "delete", classmethod(lambda cls: None))
     monkeypatch.setattr("git_bifurcate.cli.GitRepo", FakeGit)
+    monkeypatch.setattr("git_bifurcate.cli.CommandRunner", FakeTestRunner)
 
     result = runner.invoke(main, ["start", "--strategy", "hybrid", "--test", "echo"])
-    assert result.exit_code == 1
-    assert "Hybrid strategy" in result.output
+    assert result.exit_code == 0
+    assert "HYBRID STRATEGY" in result.output
+    assert "PHASE 1: File-level bifurcation" in result.output
+    assert "PHASE 2: Hunk-level bifurcation" in result.output
+    assert "BREAKING CHANGE FOUND" in result.output
 
 
 def test_cli_start_file_not_found(monkeypatch: pytest.MonkeyPatch, runner: CliRunner) -> None:

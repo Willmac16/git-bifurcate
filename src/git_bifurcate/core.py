@@ -506,6 +506,96 @@ class BifurcationEngine:
         # Conservative estimate: 2 tests per iteration
         return remaining_iterations * avg_time * 2
 
+    def bifurcate_hybrid(
+        self,
+        file_changes: list[FileChange],
+        base_commit: str,
+        bad_commit: str,
+        diff_text: str,
+        verbose: bool = True,
+    ) -> tuple[FileChange, HunkChange] | FileChange | None:
+        """Hybrid bifurcation: file-level first, then drill down to hunk-level.
+
+        This provides the best of both worlds: fast file-level narrowing followed
+        by precise hunk-level identification.
+
+        Args:
+            file_changes: List of FileChange objects to search through.
+            base_commit: Commit SHA to apply changes on top of.
+            bad_commit: Commit SHA where changes came from (for hunk reconstruction).
+            diff_text: Full diff text for parsing hunks.
+            verbose: Whether to print progress messages.
+
+        Returns:
+            Tuple of (FileChange, HunkChange) if a specific hunk is found,
+            FileChange if the file has only one hunk,
+            or None if not found.
+        """
+        if verbose:
+            click.echo("=" * 60)
+            click.echo("PHASE 1: File-level bifurcation")
+            click.echo("=" * 60)
+            click.echo()
+
+        # Phase 1: File-level bifurcation
+        breaking_file = self.bifurcate_files(file_changes, base_commit, verbose=verbose)
+
+        if not breaking_file:
+            if verbose:
+                click.echo("\nNo single breaking file found at file level.")
+            return None
+
+        if verbose:
+            click.echo()
+            click.echo("=" * 60)
+            click.echo(f"Found breaking file: {breaking_file.file_path}")
+            click.echo("=" * 60)
+            click.echo()
+
+        # Check if this is a file type that doesn't have hunks (e.g., submodule)
+        if breaking_file.change_type in ("added", "deleted", "submodule"):
+            if verbose:
+                click.echo(
+                    f"File type '{breaking_file.change_type}' - cannot drill down to hunks."
+                )
+            return breaking_file
+
+        # Phase 2: Extract hunks from the breaking file
+        from git_bifurcate.parser import get_file_hunks
+
+        file_hunks = get_file_hunks(breaking_file.file_path, diff_text)
+
+        if not file_hunks:
+            if verbose:
+                click.echo("No hunks found in file - returning file-level result.")
+            return breaking_file
+
+        if len(file_hunks) == 1:
+            if verbose:
+                click.echo("File has only one hunk - no need to drill down further.")
+                click.echo(
+                    f"Breaking hunk: {file_hunks[0].file_path}:{file_hunks[0].start_line}-{file_hunks[0].end_line}"
+                )
+            return (breaking_file, file_hunks[0])
+
+        # Phase 3: Hunk-level bifurcation
+        if verbose:
+            click.echo(f"File has {len(file_hunks)} hunks - drilling down to hunk level...")
+            click.echo()
+            click.echo("=" * 60)
+            click.echo("PHASE 2: Hunk-level bifurcation")
+            click.echo("=" * 60)
+            click.echo()
+
+        breaking_hunk = self.bifurcate_hunks(file_hunks, base_commit, bad_commit, verbose=verbose)
+
+        if not breaking_hunk:
+            if verbose:
+                click.echo("\nNo single breaking hunk found - returning file-level result.")
+            return breaking_file
+
+        return (breaking_file, breaking_hunk)
+
     @staticmethod
     def format_time(seconds: float) -> str:
         """Format time duration in a human-readable way.
