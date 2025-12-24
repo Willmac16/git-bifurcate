@@ -1,222 +1,286 @@
 # Architecture & Implementation Details
 
-## System Architecture
+**Language:** Python 3.12+
+**Test Coverage:** 99.9%
+**Lines of Code:** ~3,900 (src) + ~9,100 (tests)
+
+## System Architecture (As Implemented)
 
 ```
 ┌─────────────────────────────────────────────────────────────┐
-│                     CLI Interface Layer                      │
-│  (Argument parsing, command routing, user interaction)       │
+│                  CLI Interface Layer (cli.py)                │
+│         Click framework - command routing, progress          │
 └──────────────────┬──────────────────────────────────────────┘
                    │
 ┌──────────────────▼──────────────────────────────────────────┐
-│                   Core Bifurcation Engine                    │
-├──────────────────────────────────────────────────────────────┤
-│  ┌────────────────┐  ┌──────────────┐  ┌─────────────────┐  │
-│  │ State Manager  │  │ Bisect Logic │  │  Test Runner    │  │
-│  │ - Save state   │  │ - Binary     │  │  - Run command  │  │
-│  │ - Load state   │  │   search     │  │  - Capture exit │  │
-│  │ - Resume       │  │ - Strategy   │  │  - Timeout      │  │
-│  └────────────────┘  └──────────────┘  └─────────────────┘  │
+│              Core Bifurcation Engine (core.py)               │
+│  - BifurcationEngine class                                   │
+│  - Binary search for files and hunks                         │
+│  - Test result caching                                       │
+│  - Statistics and time estimation                            │
+└──────┬────────────────┬────────────────────┬────────────────┘
+       │                │                    │
+       │                │                    │
+┌──────▼────────┐ ┌─────▼──────────┐ ┌──────▼────────────────┐
+│ Dependency    │ │   Commit       │ │   Change Management   │
+│ Analysis      │ │   Bisection    │ │   (parser.py,         │
+│ - dependency_ │ │   (commit_     │ │    models.py)         │
+│   analyzer.py │ │    bisect.py)  │ │   - FileChange        │
+│ - dependency_ │ │   - Bisect     │ │   - HunkChange        │
+│   graph.py    │ │     commits    │ │   - Diff parsing      │
+│ - Multi-lang  │ │   - Integrate  │ │                       │
+│   static      │ │     with       │ │                       │
+│   analysis    │ │     bifurcate  │ │                       │
+└───────────────┘ └────────────────┘ └───────────────────────┘
+                   │
+┌──────────────────▼──────────────────────────────────────────┐
+│           Git Operations Layer (git_ops.py)                  │
+│  - GitRepo class (wraps GitPython)                           │
+│  - Patch application, commit operations                      │
+│  - Submodule support                                         │
+│  - Temporary branch management                               │
 └──────────────────┬──────────────────────────────────────────┘
                    │
 ┌──────────────────▼──────────────────────────────────────────┐
-│                  Change Management Layer                     │
-├──────────────────────────────────────────────────────────────┤
-│  ┌────────────────┐  ┌──────────────┐  ┌─────────────────┐  │
-│  │  Diff Parser   │  │ Change Graph │  │ Change Applier  │  │
-│  │  - Parse diff  │  │ - Dependencies│ │ - Apply patches │ │
-│  │  - Extract     │  │ - Grouping   │  │ - Create commits│ │
-│  │    hunks       │  │ - Conflicts  │  │ - Revert        │  │
-│  └────────────────┘  └──────────────┘  └─────────────────┘  │
-└──────────────────┬──────────────────────────────────────────┘
-                   │
-┌──────────────────▼──────────────────────────────────────────┐
-│                      Git Operations Layer                    │
-│  (git diff, git apply, git commit, git reset, worktree)     │
+│           Test Execution Layer (test_runner.py)              │
+│  - CommandRunner class                                       │
+│  - Subprocess execution with timeout                         │
 └──────────────────────────────────────────────────────────────┘
 ```
 
-## Core Data Models
+## Core Data Models (Python)
 
-### Change
+### FileChange and HunkChange
 
-Represents a single atomic change (file or hunk):
+Represents individual changes:
 
-```rust
-struct Change {
-    id: String,              // Unique identifier
-    change_type: ChangeType, // File or Hunk
-    file_path: String,       // Path to file
-    start_line: Option<usize>, // For hunks
-    end_line: Option<usize>,   // For hunks
-    diff_content: String,    // The actual diff
-    dependencies: Vec<String>, // IDs of changes this depends on
-    status: ChangeStatus,    // Unknown, Good, Bad, Skip
-}
+```python
+@dataclass
+class FileChange:
+    """Represents a file-level change"""
+    file_path: str
+    change_type: str  # 'added', 'modified', 'deleted'
+    diff: str
+    is_submodule: bool = False
+    submodule_commits: tuple[str, str] | None = None
 
-enum ChangeType {
-    File,
-    Hunk,
-}
-
-enum ChangeStatus {
-    Unknown,
-    Good,    // Test passes with this change
-    Bad,     // Test fails with this change
-    Skip,    // Couldn't test (e.g., won't build)
-}
+@dataclass
+class HunkChange:
+    """Represents a hunk-level change"""
+    file_path: str
+    hunk_index: int
+    old_start: int
+    old_count: int
+    new_start: int
+    new_count: int
+    lines: list[str]
+    header: str
 ```
 
 ### BifurcationState
 
 Persistent state for resuming bifurcation:
 
-```rust
-struct BifurcationState {
-    commit_sha: String,
-    parent_sha: String,
-    strategy: Strategy,
-    test_command: String,
-    working_dir: Option<PathBuf>,
+```python
+@dataclass
+class BifurcationState:
+    """Persistent bifurcation session state"""
+    commit_sha: str
+    parent_sha: str
+    strategy: Strategy
+    test_command: str
 
-    changes: Vec<Change>,
-    search_space: Vec<usize>,        // Indices of changes still being tested
-    tested_combinations: HashMap<Vec<usize>, TestResult>,
-    found_breaking: Vec<usize>,      // Indices of identified breaking changes
+    # For file-level bifurcation
+    file_changes: list[FileChange]
+    # For hunk-level bifurcation
+    hunk_changes: list[HunkChange] | None
 
-    current_iteration: usize,
-    total_iterations: usize,
-}
+    # Search state
+    search_space: list[int]  # Indices still being tested
+    tested_combinations: dict[str, CommandResult]
+    found_breaking_indices: list[int]
 
-enum Strategy {
-    File,
-    Hunk,
-    Hybrid,
-}
+    # Metadata
+    working_dir: str
+    created_at: str
+    analyze_deps: bool
 
-enum TestResult {
-    Pass,
-    Fail,
-    Skip,
-    Error(String),
-}
+    def to_json(self) -> str: ...
+    @classmethod
+    def from_json(cls, json_str: str) -> BifurcationState: ...
+
+class Strategy(Enum):
+    FILE = "file"
+    HUNK = "hunk"
+    HYBRID = "hybrid"  # Not yet implemented
+
+class CommandResult(Enum):
+    PASS = "pass"
+    FAIL = "fail"
+    SKIP = "skip"
 ```
 
 ## Key Algorithms
 
-### 1. Diff Parsing Algorithm
+### 1. Diff Parsing Algorithm (Actual Implementation)
 
 Parse git diff output into structured changes:
 
 ```python
-def parse_diff(commit_sha, parent_sha):
-    """
-    Parse diff between commit and parent into Change objects
-    """
-    diff_output = run_git(['diff', parent_sha, commit_sha])
+def parse_file_changes(repo: GitRepo, commit_sha: str, parent_sha: str,
+                      restrict_paths: list[str] | None = None) -> list[FileChange]:
+    """Parse commit diff into file-level changes (parser.py)"""
+    diff = repo.get_commit_diff(commit_sha, parent_sha)
 
-    changes = []
-    current_file = None
-    current_hunk = None
+    file_changes = []
+    for diff_item in diff:
+        # Check if path matches restriction
+        if restrict_paths and not matches_any_path(diff_item.a_path, restrict_paths):
+            continue
 
-    for line in diff_output.split('\n'):
-        if line.startswith('diff --git'):
-            # New file
-            if current_file:
-                changes.append(current_file)
-            current_file = parse_file_header(line)
+        # Handle submodule changes
+        if diff_item.a_blob and diff_item.a_blob.mode == 0o160000:
+            file_changes.append(FileChange(
+                file_path=diff_item.a_path,
+                change_type="modified",
+                diff=str(diff_item),
+                is_submodule=True,
+                submodule_commits=(diff_item.a_blob.hexsha, diff_item.b_blob.hexsha)
+            ))
+        else:
+            file_changes.append(FileChange(
+                file_path=diff_item.a_path or diff_item.b_path,
+                change_type=get_change_type(diff_item),
+                diff=str(diff_item),
+                is_submodule=False
+            ))
 
-        elif line.startswith('@@'):
-            # New hunk
-            if current_hunk:
-                current_file.add_hunk(current_hunk)
-            current_hunk = parse_hunk_header(line)
+    return file_changes
 
-        elif current_hunk:
-            current_hunk.add_line(line)
+def parse_hunk_changes(file_changes: list[FileChange]) -> list[HunkChange]:
+    """Parse file diffs into individual hunks (parser.py)"""
+    hunk_changes = []
 
-    # Don't forget last file
-    if current_file:
-        changes.append(current_file)
+    for file_change in file_changes:
+        hunks = extract_hunks_from_diff(file_change.diff)
 
-    return changes
+        for idx, hunk in enumerate(hunks):
+            hunk_changes.append(HunkChange(
+                file_path=file_change.file_path,
+                hunk_index=idx,
+                old_start=hunk.old_start,
+                old_count=hunk.old_count,
+                new_start=hunk.new_start,
+                new_count=hunk.new_count,
+                lines=hunk.lines,
+                header=hunk.header
+            ))
+
+    return hunk_changes
 ```
 
-### 2. Binary Search with Dependency Handling
+### 2. Binary Search Algorithm (Actual Implementation in core.py)
 
 ```python
-def bifurcate_with_dependencies(changes, test_fn, dependency_graph):
-    """
-    Binary search accounting for dependencies between changes
-    """
-    search_space = list(range(len(changes)))
+class BifurcationEngine:
+    """Core bifurcation engine implementing binary search"""
 
-    while len(search_space) > 1:
-        mid = len(search_space) // 2
-        lower_indices = search_space[:mid]
-        upper_indices = search_space[mid:]
+    def bifurcate_files(self, file_changes: list[FileChange]) -> FileChange | None:
+        """Binary search through file-level changes"""
+        search_space = list(range(len(file_changes)))
 
-        # Expand to include dependencies
-        lower_with_deps = expand_with_dependencies(lower_indices, dependency_graph)
+        while len(search_space) > 1:
+            mid = len(search_space) // 2
+            lower_half = search_space[:mid]
+            upper_half = search_space[mid:]
 
-        result = test_with_changes(lower_with_deps, test_fn)
+            # Test lower half
+            result = self._test_file_subset(lower_half, file_changes)
 
-        if result == TestResult.Fail:
-            # Problem is in lower half
-            search_space = lower_indices
-        elif result == TestResult.Pass:
-            # Problem is in upper half
-            search_space = upper_indices
-        else:
-            # Skip or error - try different split
-            search_space = handle_skip(search_space, lower_indices, upper_indices)
+            if result == CommandResult.FAIL:
+                search_space = lower_half
+            elif result == CommandResult.PASS:
+                search_space = upper_half
+            else:  # SKIP
+                # Try upper half if lower fails to build
+                result_upper = self._test_file_subset(upper_half, file_changes)
+                if result_upper == CommandResult.FAIL:
+                    search_space = upper_half
+                else:
+                    # Both halves have issues - may need interaction detection
+                    return self._handle_interaction(lower_half, upper_half, file_changes)
 
-    return search_space[0]
+        # Found single breaking change
+        if search_space:
+            return file_changes[search_space[0]]
+        return None
 
-def expand_with_dependencies(indices, dependency_graph):
-    """
-    Add all dependencies of selected changes
-    """
-    expanded = set(indices)
-    queue = list(indices)
+    def bifurcate_hunks(self, hunk_changes: list[HunkChange]) -> HunkChange | None:
+        """Binary search through hunk-level changes (similar algorithm)"""
+        # Similar binary search but reconstructs patches for hunks
+        ...
 
-    while queue:
-        idx = queue.pop(0)
-        for dep_idx in dependency_graph.get_dependencies(idx):
-            if dep_idx not in expanded:
-                expanded.add(dep_idx)
-                queue.append(dep_idx)
+    def _test_file_subset(self, indices: list[int],
+                         file_changes: list[FileChange]) -> CommandResult:
+        """Test with a subset of file changes"""
+        # Check cache first
+        cache_key = tuple(sorted(indices))
+        if cache_key in self.tested_combinations:
+            return self.tested_combinations[cache_key]
 
-    return sorted(expanded)
+        # Apply changes and run test
+        selected_changes = [file_changes[i] for i in indices]
+        self.git_repo.apply_changes(selected_changes, self.parent_sha)
+
+        result = self.test_runner.run(self.test_command)
+
+        # Cache result
+        self.tested_combinations[cache_key] = result
+        self.stats.tests_run += 1
+
+        return result
 ```
 
-### 3. Interaction Detection
+### 3. Interaction Detection (Actual Implementation)
 
 When both halves pass individually but fail together:
 
 ```python
-def find_interaction(lower_changes, upper_changes, test_fn):
-    """
-    Find specific changes that interact to cause failure
-    """
-    # Try each change from lower with all of upper
-    for i, lower_change in enumerate(lower_changes):
-        if test_with_changes([lower_change] + upper_changes) == Fail:
-            # Found a change in lower that's part of the interaction
-            # Now bisect upper to find what it interacts with
-            upper_culprit = bifurcate(upper_changes,
-                                     lambda changes: test_with_changes([lower_change] + changes))
-            return InteractionResult([lower_change, upper_culprit])
+def _handle_interaction(self, lower_indices: list[int], upper_indices: list[int],
+                       changes: list) -> None:
+    """Handle cases where changes interact to cause failure (core.py)"""
 
-    # Try each change from upper with all of lower
-    for upper_change in upper_changes:
-        if test_with_changes(lower_changes + [upper_change]) == Fail:
-            lower_culprit = bifurcate(lower_changes,
-                                     lambda changes: test_with_changes(changes + [upper_change]))
-            return InteractionResult([upper_change, lower_culprit])
+    # Budget-limited search to avoid exponential complexity
+    MAX_COMBINATIONS = 64
+    tested = 0
 
-    # Complex interaction - fall back to exhaustive search or user guidance
-    return find_complex_interaction(lower_changes, upper_changes, test_fn)
+    # Try dependent pairs first (optimization when deps are known)
+    if self.dep_graph:
+        for i in lower_indices:
+            for j in upper_indices:
+                if self.dep_graph.are_dependent(i, j):
+                    if self._test_subset([i, j], changes) == CommandResult.FAIL:
+                        return [changes[i], changes[j]]
+                    tested += 1
+                    if tested >= MAX_COMBINATIONS:
+                        break
+
+    # Try all size-2 combinations
+    for i in lower_indices:
+        for j in upper_indices:
+            if tested >= MAX_COMBINATIONS:
+                break
+            if self._test_subset([i, j], changes) == CommandResult.FAIL:
+                return [changes[i], changes[j]]
+            tested += 1
+
+    # If still not found, try size-3, size-4, etc.
+    # (with combinatorial budget limits)
+
+    # Give up and report all possibilities
+    click.echo("Could not isolate to a single change or simple interaction.")
+    click.echo(f"Possible breaking changes: {lower_indices + upper_indices}")
+    return None
 ```
 
 ### 4. Change Application
@@ -260,45 +324,91 @@ def apply_changes(changes, base_commit, strategy='temp-commit'):
             return Failure(reason='conflicts')
 ```
 
-## Dependency Detection
+## Dependency Detection (Actual Multi-Language Implementation)
 
-### Static Analysis Approach
+### Static Analysis Approach (dependency_analyzer.py)
+
+**Supports:** Python (AST-based), C/C++, Rust, Go, Swift, Zig, Verilog (regex-based)
 
 ```python
-def detect_dependencies(changes):
-    """
-    Analyze changes to detect dependencies between them
-    """
-    dependency_graph = DependencyGraph()
+class DependencyAnalyzer:
+    """Multi-language static dependency analysis"""
 
-    for i, change_a in enumerate(changes):
-        for j, change_b in enumerate(changes):
-            if i == j:
-                continue
+    def analyze_dependencies(self, changes: list[FileChange | HunkChange],
+                           repo_path: str) -> DependencyGraph:
+        """Build dependency graph from changes"""
+        graph = DependencyGraph()
 
-            # Check various dependency types
-            if has_import_dependency(change_a, change_b):
-                dependency_graph.add_edge(j, i)  # b depends on a
+        # Extract symbols from each change
+        symbols_by_change = {}
+        for idx, change in enumerate(changes):
+            symbols_by_change[idx] = self._extract_symbols(change, repo_path)
 
-            if has_reference_dependency(change_a, change_b):
-                dependency_graph.add_edge(j, i)
+        # Detect dependencies between changes
+        for i, symbols_i in symbols_by_change.items():
+            for j, symbols_j in symbols_by_change.items():
+                if i == j:
+                    continue
 
-            if has_order_dependency(change_a, change_b):
-                dependency_graph.add_edge(j, i)
+                # Check if j references anything defined in i
+                if symbols_j.references & symbols_i.definitions:
+                    graph.add_dependency(j, i)  # j depends on i
 
-    return dependency_graph
+                # Contextual dependency (proximity in same file)
+                if self._are_contextually_dependent(changes[i], changes[j]):
+                    graph.add_dependency(j, i)
 
-def has_import_dependency(change_a, change_b):
-    """
-    Check if change_b imports something defined in change_a
-    """
-    # Extract definitions from change_a
-    definitions = extract_definitions(change_a)  # Functions, classes, variables
+        return graph
 
-    # Extract imports/references from change_b
-    references = extract_references(change_b)
+    def _extract_symbols(self, change: FileChange, repo_path: str) -> SymbolInfo:
+        """Extract definitions and references from a change"""
+        file_ext = Path(change.file_path).suffix
 
-    return bool(definitions & references)
+        if file_ext == '.py':
+            return self._extract_python_symbols(change)
+        elif file_ext in {'.c', '.cpp', '.cc', '.h', '.hpp'}:
+            return self._extract_cpp_symbols(change)
+        elif file_ext == '.rs':
+            return self._extract_rust_symbols(change)
+        elif file_ext == '.go':
+            return self._extract_go_symbols(change)
+        # ... etc for other languages
+
+    def _extract_python_symbols(self, change: FileChange) -> SymbolInfo:
+        """AST-based Python symbol extraction"""
+        tree = ast.parse(change.diff)
+
+        definitions = set()
+        references = set()
+
+        for node in ast.walk(tree):
+            if isinstance(node, (ast.FunctionDef, ast.ClassDef)):
+                definitions.add(node.name)
+            elif isinstance(node, ast.Name):
+                references.add(node.id)
+            elif isinstance(node, ast.Import):
+                for alias in node.names:
+                    references.add(alias.name)
+
+        return SymbolInfo(definitions, references)
+
+    def _extract_cpp_symbols(self, change: FileChange) -> SymbolInfo:
+        """Regex-based C++ symbol extraction"""
+        # Extract function/class definitions
+        func_pattern = r'\b(?:void|int|bool|auto|template)\s+(\w+)\s*\('
+        class_pattern = r'\bclass\s+(\w+)'
+
+        definitions = set(re.findall(func_pattern, change.diff))
+        definitions.update(re.findall(class_pattern, change.diff))
+
+        # Extract references (function calls, includes)
+        call_pattern = r'\b(\w+)\s*\('
+        include_pattern = r'#include\s+[<"](\w+)'
+
+        references = set(re.findall(call_pattern, change.diff))
+        references.update(re.findall(include_pattern, change.diff))
+
+        return SymbolInfo(definitions, references)
 ```
 
 ### Build-Based Approach (Simpler)
@@ -397,39 +507,58 @@ class StateManager:
             os.remove(self.state_file)
 ```
 
-## Testing Strategy
+## Testing Infrastructure (Production Quality)
 
-### Unit Tests
+### Test Coverage: 99.9%
 
-- Diff parser with various diff formats
-- Binary search algorithm with different inputs
-- Dependency detection
-- Change application and reversion
+**215 test functions** across 13 test files, **9,061 lines of test code**
 
-### Integration Tests
-
-- Full bifurcation runs on test repositories
-- State persistence and resumption
-- Error handling (build failures, test errors)
-
-### Test Repository Structure
-
-Create test repos with known breaking changes:
+### Test Organization
 
 ```
-test-repo-1/
-  - 10 commits, commit 5 is bad
-  - Commit 5 has 3 files changed
-  - File B, hunk 2 is the breaking change
+tests/
+├── test_cli.py (1,860 lines)              # CLI interface tests
+├── test_git_ops.py (1,716 lines)          # Git operations tests
+├── test_core.py (964 lines)               # Core engine tests
+├── test_multi_language_dependencies.py    # Multi-language dep tests
+├── test_dependency_detection.py           # Dependency detection tests
+├── test_dependency_analyzer.py            # Static analysis tests
+├── test_models.py                         # Data model tests
+├── test_commit_bisect.py                  # Commit bisection tests
+├── test_dependency_graph.py               # Graph algorithm tests
+├── test_parser.py                         # Diff parser tests
+├── test_integration.py                    # End-to-end tests
+├── test_test_runner.py                    # Test runner tests
+└── conftest.py                            # Shared fixtures
+```
 
-test-repo-2/
-  - Single commit with 2 independent breaking changes
+### Test Categories
 
-test-repo-3/
-  - Interacting changes (both needed to break)
+1. **Unit Tests**: Test individual functions and classes in isolation
+2. **Integration Tests**: Test full workflows with temporary git repos
+3. **Multi-Language Tests**: Verify dependency detection for 7 languages
+4. **Edge Case Tests**: Error handling, corrupt state, submodules
 
-test-repo-4/
-  - Changes with dependencies (imports, references)
+### CI/CD Pipeline (GitHub Actions)
+
+**Workflows:**
+- `test.yml` - Run tests with 99.9% coverage requirement (Python 3.12, 3.13)
+- `lint.yml` - Ruff formatting and linting + type checking
+- `build.yml` - Verify package builds correctly
+- `release.yml` - Automated releases
+
+**Pre-commit Hooks:**
+- Ruff formatter check
+- Ruff linter
+- Type checker (ty)
+- Pytest with coverage check
+
+### Local Testing
+
+```bash
+./test                # Run everything (lint + tests + coverage)
+./test --lint-only    # Only linting and type checks
+./test --test-only    # Only tests with coverage
 ```
 
 ## Performance Optimizations
