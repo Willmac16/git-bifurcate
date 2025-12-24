@@ -27,27 +27,27 @@ Binary search: 16 changes → 5 tests instead of up to 16
 ## Core Commands
 
 ```bash
-# Start bifurcation
+# Start bifurcation (automated)
 git bifurcate start <commit> --test "npm test"
+
+# Commit bisection + bifurcation
+git bifurcate bisect <good> <bad> --test "npm test"
 
 # Check status
 git bifurcate status
 
+# Resume interrupted session
+git bifurcate continue
+
 # Reset/abort
 git bifurcate reset
-
-# Manual mode
-git bifurcate start <commit> --manual
-git bifurcate apply-half upper
-npm test
-git bifurcate bad
 ```
 
 ## Strategies
 
-- **file**: Search at file level only (fast, less precise)
+- **file** (default): Search at file level only (fast, less precise)
 - **hunk**: Search at hunk level (slow, very precise)
-- **hybrid**: File first, then hunk (recommended)
+- **hybrid**: File first, then hunk (planned, not yet implemented)
 
 ## Key Concepts
 
@@ -124,17 +124,20 @@ Git Operations (diff, apply, commit, reset)
 
 ```
 git-bifurcate/
-├── src/
-│   ├── cli.py          # Commands
-│   ├── core.py         # Bifurcation engine
-│   ├── parser.py       # Diff parsing
-│   ├── git_ops.py      # Git wrapper
-│   └── models.py       # Data models
-├── tests/
-│   └── fixtures/       # Test repos
-├── DESIGN.md           # High-level design
-├── ARCHITECTURE.md     # Implementation details
-└── IMPLEMENTATION_ROADMAP.md  # Step-by-step guide
+├── src/git_bifurcate/
+│   ├── cli.py                  # CLI commands
+│   ├── core.py                 # Bifurcation engine
+│   ├── parser.py               # Diff parsing
+│   ├── git_ops.py              # Git operations
+│   ├── models.py               # Data models
+│   ├── dependency_analyzer.py  # Multi-language static analysis
+│   ├── dependency_graph.py     # Dependency graph
+│   ├── commit_bisect.py        # Commit bisection
+│   └── test_runner.py          # Test execution
+├── tests/                      # 215 tests, 99.9% coverage
+├── DESIGN.md                   # High-level design
+├── ARCHITECTURE.md             # Implementation details
+└── CLAUDE.md                   # Development guide
 ```
 
 ## Example Session
@@ -143,39 +146,29 @@ git-bifurcate/
 # After git bisect finds bad commit abc123
 $ git bifurcate start abc123 --test "pytest tests/test_auth.py"
 
-Bifurcating commit abc123
-Found 12 file changes
-Strategy: hybrid
+Bifurcating commit abc123 (12 file changes)
+Strategy: file
+Parent: def456
 
-Testing files...
-[==========] Test [1-6]: PASS
-[==========] Test [7-12]: FAIL
-[=====     ] Test [7-9]: FAIL
-[===       ] Test [7-8]: PASS
-[=         ] Test [9]: FAIL
+Iteration 1/4: Testing changes [1-6] of 12... PASS
+Iteration 2/4: Testing changes [7-12] of 12... FAIL
+Iteration 3/5: Testing changes [7-9] of 6... FAIL
+Iteration 4/5: Testing changes [7-8] of 4... PASS
+Iteration 5/5: Testing change [9] of 2... FAIL
 
-Breaking file: src/auth/login.py
+Breaking change found:
+  src/auth/login.py
 
-Testing hunks in src/auth/login.py...
-Found 5 hunks
-[====      ] Test hunks [1-3]: PASS
-[======    ] Test hunks [4-5]: FAIL
-[=======   ] Test hunk [4]: FAIL
+Completed in 5 iterations (10 tests run: 5 passed, 5 failed)
 
-Found breaking change:
-  File: src/auth/login.py
-  Lines: 45-52
-  Hunk: Modified validatePassword function
+# For hunk-level precision, use --strategy hunk
+$ git bifurcate start abc123 --test "pytest" --strategy hunk
 
-  @@ -45,7 +45,8 @@
-   function validatePassword(password) {
-  -  return password.length >= 8;
-  +  const minLength = 8;
-  +  return password.length > minLength;  # BUG: should be >=
-   }
-
-Tests performed: 7
-Time saved: ~90% vs manual review
+Bifurcating commit abc123 (45 hunk changes)
+Strategy: hunk
+...
+Breaking change found:
+  src/auth/login.py:45-52
 ```
 
 ## State File Format
@@ -196,12 +189,15 @@ Time saved: ~90% vs manual review
 }
 ```
 
-## Implementation Phases
+## Implementation Status
 
-**Phase 1**: File-level, automated mode, basic state
-**Phase 2**: Hunk-level, hybrid strategy
-**Phase 3**: Manual mode, skip handling, robustness
-**Phase 4**: Parallel testing, multiple breaks, GUI
+**✅ Phase 1**: File-level, automated mode, state persistence
+**✅ Phase 2**: Hunk-level bifurcation
+**✅ Phase 3**: Dependency analysis, skip handling, robustness
+**✅ Phase 4**: Multiple breaks (--find-more), commit bisection
+**✅ Phase 5**: Production quality - 99.9% test coverage, CI/CD
+
+**Planned**: Hybrid strategy, manual mode, parallel testing, GUI
 
 ## Performance
 
@@ -209,10 +205,13 @@ Time saved: ~90% vs manual review
 - **Worst case**: O(n log n) with many dependencies
 - **Typical**: 5-10 tests for commits with 20-50 changes
 
-## Language Choice
+## Language
 
-**MVP**: Python (fast prototyping, GitPython library)
-**Production**: Consider Rust (performance, single binary)
+**Python 3.12+** (Implemented)
+- GitPython for git operations
+- Click for CLI
+- 99.9% test coverage with pytest
+- Type checked with ty, linted with ruff
 
 ## Key Insights
 
@@ -222,11 +221,10 @@ Time saved: ~90% vs manual review
 4. **Testing is expensive** - minimize iterations
 5. **Multiple breaks common** in large commits
 
-## Next Steps
+## Getting Started
 
-1. Read DESIGN.md for full design
-2. Read ARCHITECTURE.md for implementation details
-3. Read IMPLEMENTATION_ROADMAP.md for step-by-step guide
-4. Start with Phase 1 MVP
-5. Test on real repositories
-6. Iterate based on feedback
+1. Install: `pip install git-bifurcate`
+2. Read README.md for usage examples
+3. Read DESIGN.md for full design
+4. Read ARCHITECTURE.md for implementation details
+5. Check CONTRIBUTING.md to contribute
