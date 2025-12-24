@@ -19,6 +19,52 @@ from git_bifurcate.parser import parse_file_changes, parse_hunk_changes
 from git_bifurcate.test_runner import CommandRunner
 
 
+def _matches_path_filter(file_path: str, filter_paths: tuple[str, ...]) -> bool:
+    """Check if a file path matches any of the filter paths.
+
+    Args:
+        file_path: The file path to check.
+        filter_paths: Tuple of paths to match against (files or directories).
+
+    Returns:
+        True if the file matches any filter path, False otherwise.
+    """
+    if not filter_paths:
+        return True  # No filter means include everything
+
+    for filter_path in filter_paths:
+        # Normalize paths for comparison
+        filter_path_normalized = filter_path.rstrip("/")
+
+        # Exact file match
+        if file_path == filter_path_normalized:
+            return True
+
+        # Directory match (file is under the directory)
+        if file_path.startswith(filter_path_normalized + "/"):
+            return True
+
+    return False
+
+
+def _filter_changes_by_paths(
+    changes: list[FileChange] | list[HunkChange], paths: tuple[str, ...]
+) -> list[FileChange] | list[HunkChange]:
+    """Filter changes to only include those matching the specified paths.
+
+    Args:
+        changes: List of FileChange or HunkChange objects.
+        paths: Tuple of paths to filter by (files or directories).
+
+    Returns:
+        Filtered list of changes.
+    """
+    if not paths:
+        return changes  # No filter means return all changes
+
+    return [change for change in changes if _matches_path_filter(change.file_path, paths)]
+
+
 @click.group(invoke_without_command=True)
 @click.option("--version", is_flag=True, help="Show version and exit")
 @click.pass_context
@@ -37,6 +83,7 @@ def main(ctx: click.Context, version: bool) -> None:
 
 @main.command()
 @click.argument("commit", required=False)
+@click.argument("paths", nargs=-1, type=click.Path())
 @click.option(
     "--test",
     "-t",
@@ -69,6 +116,7 @@ def main(ctx: click.Context, version: bool) -> None:
 )
 def start(
     commit: str | None,
+    paths: tuple[str, ...],
     test: str,
     strategy: str,
     parent: str | None,
@@ -78,9 +126,13 @@ def start(
     """Start bifurcating a commit to find breaking changes.
 
     COMMIT is the commit SHA to bifurcate (defaults to HEAD).
+    PATHS restricts the search to specific files or directories (optional).
+    Use -- to separate commit from paths if needed.
 
-    Example:
+    Examples:
         git bifurcate start abc123 --test "pytest tests/test_feature.py"
+        git bifurcate start abc123 --test "pytest" -- src/module.py
+        git bifurcate start --test "pytest" -- src/problematic/
     """
     # Check if bifurcation already in progress
     if BifurcationState.exists():
@@ -123,6 +175,11 @@ def start(
         if strategy_enum == Strategy.FILE:
             file_changes = parse_file_changes(diff_text)
             click.echo(f"Found {len(file_changes)} file-level changes")
+
+            # Apply path filtering if specified
+            if paths:
+                file_changes = cast(list[FileChange], _filter_changes_by_paths(file_changes, paths))
+                click.echo(f"Filtered to {len(file_changes)} changes matching: {', '.join(paths)}")
 
             if not file_changes:
                 click.echo("Error: No changes found in commit")
@@ -314,6 +371,11 @@ def start(
         elif strategy_enum == Strategy.HUNK:
             hunk_changes = parse_hunk_changes(diff_text)
             click.echo(f"Found {len(hunk_changes)} hunk-level changes")
+
+            # Apply path filtering if specified
+            if paths:
+                hunk_changes = cast(list[HunkChange], _filter_changes_by_paths(hunk_changes, paths))
+                click.echo(f"Filtered to {len(hunk_changes)} changes matching: {', '.join(paths)}")
 
             if not hunk_changes:
                 click.echo("Error: No changes found in commit")
