@@ -28,36 +28,48 @@ This file provides guidance to Claude Code (claude.ai/code) when working with co
 **Search Space**: The set of changes currently being bisected
 
 **Strategy**: Granularity level for search:
-- `file`: Binary search across files only
-- `hunk`: Binary search across individual hunks
-- `hybrid`: File-level first, then drill down to hunk-level
+- `file`: Binary search across files only (default, implemented ✅)
+- `hunk`: Binary search across individual hunks (implemented ✅)
+- `hybrid`: File-level first, then drill down to hunk-level (planned, not implemented ❌)
 
 **State**: Persistent bifurcation state saved to `.git/bifurcate-state.json` for resumption
 
-### Key Data Models
+### Key Data Models (Python)
 
-```rust
-Change {
-    id: String,
-    change_type: File | Hunk,
-    file_path: String,
-    start_line: Option<usize>,
-    end_line: Option<usize>,
-    diff_content: String,
-    dependencies: Vec<String>,  // Other changes this depends on
-    status: Unknown | Good | Bad | Skip
-}
+```python
+@dataclass
+class FileChange:
+    file_path: str
+    change_type: str  # 'added', 'modified', 'deleted'
+    diff: str
+    is_submodule: bool = False
+    submodule_commits: tuple[str, str] | None = None
 
-BifurcationState {
-    commit_sha: String,
-    parent_sha: String,
-    strategy: Strategy,
-    test_command: String,
-    changes: Vec<Change>,
-    search_space: Vec<usize>,  // Indices still being tested
-    tested_combinations: HashMap<Vec<usize>, TestResult>,
-    found_breaking: Vec<usize>
-}
+@dataclass
+class HunkChange:
+    file_path: str
+    hunk_index: int
+    old_start: int
+    old_count: int
+    new_start: int
+    new_count: int
+    lines: list[str]
+    header: str
+
+@dataclass
+class BifurcationState:
+    commit_sha: str
+    parent_sha: str
+    strategy: Strategy
+    test_command: str
+    file_changes: list[FileChange]
+    hunk_changes: list[HunkChange] | None
+    search_space: list[int]  # Indices still being tested
+    tested_combinations: dict[str, CommandResult]
+    found_breaking_indices: list[int]
+    working_dir: str
+    created_at: str
+    analyze_deps: bool
 ```
 
 ## Key Algorithms
@@ -72,11 +84,18 @@ The core algorithm performs binary search but must handle dependencies between c
 4. Narrow search space based on results
 5. Handle special case: both halves pass but together they fail (interaction)
 
-### Dependency Detection
+### Dependency Detection (Implemented ✅)
 
-Two approaches:
-1. **Static Analysis** (complex): Parse code to find imports, references, definitions
-2. **Build-Based** (simpler): Track which combinations fail to compile → mark as dependencies
+Multi-language static analysis implemented in `dependency_analyzer.py` and `dependency_graph.py`:
+1. **Static Analysis** (Implemented):
+   - **Python**: AST-based parsing for functions, classes, imports
+   - **C/C++, Rust, Go, Swift, Zig, Verilog**: Regex-based symbol extraction
+   - Detects definitions vs references
+   - Builds dependency graph with transitive closure
+2. **Contextual Dependencies**: Hunks within 5 lines marked as potentially dependent
+3. **Graph Algorithms**: Topological sort, independent sets, minimal testable subsets
+
+Enabled with `--analyze-deps` flag.
 
 ### Change Application Strategies
 
@@ -84,15 +103,21 @@ Two approaches:
 - **Patch Application**: Use `git apply` to apply/revert without commits
 - **Worktrees**: Create separate worktrees for parallel testing
 
-## Implementation Phases
+## Implementation Status
 
-**Phase 1 - MVP**: File-level only, automated mode, basic state persistence
+**✅ Phase 1 - MVP**: File-level bifurcation, automated mode, state persistence - COMPLETE
 
-**Phase 2 - Hunk Level**: Parse hunks, hunk-level bifurcation, hybrid strategy
+**✅ Phase 2 - Hunk Level**: Parse hunks, hunk-level bifurcation - COMPLETE
+- ❌ Hybrid strategy - NOT YET IMPLEMENTED
 
-**Phase 3 - Robustness**: Dependency handling, skip problematic combinations, manual mode
+**✅ Phase 3 - Robustness**: Multi-language dependency detection, skip problematic combinations - COMPLETE
+- ❌ Manual mode - NOT YET IMPLEMENTED
 
-**Phase 4 - Advanced**: Parallel testing, multiple breaking changes, GUI/TUI
+**✅ Phase 4 - Advanced Features**: Multiple breaking changes (--find-more), commit bisection, path filtering, submodule support - COMPLETE
+- ❌ Parallel testing - NOT YET IMPLEMENTED
+- ❌ GUI/TUI - NOT YET IMPLEMENTED
+
+**✅ Phase 5 - Production Quality**: 99.9% test coverage, CI/CD, linting, type checking - COMPLETE
 
 ## Critical Design Decisions
 
@@ -128,43 +153,95 @@ Or test all changes individually in parallel, then test combinations.
 
 ## Development Commands
 
-**Note**: Not yet implemented. When implementation begins, add:
+**Language:** Python 3.12+
+**Package Manager:** uv (modern Python package manager)
 
 ```bash
-# Build
-[language-specific build command]
+# Setup development environment
+uv venv
+source .venv/bin/activate  # or `.venv\Scripts\activate` on Windows
+uv pip install -e .
 
-# Run tests
-[test command]
+# Run all checks (linting + tests + coverage)
+./test
 
-# Run single test
-[single test command]
+# Run only linting and type checks
+./test --lint-only
 
-# Install dependencies
-[dependency installation]
+# Run only tests with coverage (HTML and XML reports)
+./test --test-only
+
+# Run specific test file
+uv run pytest tests/test_core.py
+
+# Run specific test function
+uv run pytest tests/test_core.py::test_bifurcate_files -v
 
 # Format code
-[formatter]
+uv run ruff format .
 
-# Lint
-[linter]
+# Lint code
+uv run ruff check .
+
+# Fix auto-fixable lint issues
+uv run ruff check --fix .
+
+# Type check
+uv run ty check src/
+
+# Install pre-commit hooks (runs on every commit)
+uv run pre-commit install
+
+# Run pre-commit on all files
+uv run pre-commit run --all-files
+
+# Build package
+uv build
 ```
 
-## File Structure
+## File Structure (Actual Implementation)
 
 ```
 git-bifurcate/
-├── DESIGN.md           # High-level design and user-facing concepts
-├── ARCHITECTURE.md     # Implementation details, algorithms, data structures
-├── README.md           # User documentation
-├── CLAUDE.md          # This file
-├── src/               # Source code (future)
-│   ├── cli/          # Command-line interface
-│   ├── core/         # Bifurcation engine
-│   ├── git/          # Git operations wrapper
-│   └── parser/       # Diff parsing
-└── tests/            # Test suite (future)
-    └── fixtures/     # Test repositories with known breaks
+├── DESIGN.md                    # High-level design document
+├── ARCHITECTURE.md              # Implementation details and algorithms
+├── README.md                    # User documentation
+├── CLAUDE.md                    # This file
+├── LICENSE                      # MIT License
+├── pyproject.toml               # Python package configuration
+├── .github/workflows/           # CI/CD pipelines
+│   ├── test.yml                # Test workflow (99.9% coverage requirement)
+│   ├── lint.yml                # Linting and type checking
+│   ├── build.yml               # Build verification
+│   └── release.yml             # Automated releases
+├── src/git_bifurcate/          # Source code (3,871 LOC)
+│   ├── __init__.py             # Package initialization
+│   ├── cli.py                  # CLI interface (Click framework)
+│   ├── core.py                 # Bifurcation engine (binary search)
+│   ├── git_ops.py              # Git operations (GitPython wrapper)
+│   ├── parser.py               # Diff parsing
+│   ├── models.py               # Data models (FileChange, HunkChange, State)
+│   ├── dependency_analyzer.py  # Multi-language static analysis
+│   ├── dependency_graph.py     # Dependency graph algorithms
+│   ├── commit_bisect.py        # Commit-level bisection
+│   └── test_runner.py          # Test execution with timeout
+├── tests/                      # Test suite (9,061 LOC, 215 tests)
+│   ├── conftest.py             # Shared fixtures
+│   ├── test_cli.py             # CLI tests (1,860 lines)
+│   ├── test_git_ops.py         # Git operations tests (1,716 lines)
+│   ├── test_core.py            # Core engine tests (964 lines)
+│   ├── test_multi_language_dependencies.py
+│   ├── test_dependency_detection.py
+│   ├── test_dependency_analyzer.py
+│   ├── test_models.py
+│   ├── test_commit_bisect.py
+│   ├── test_dependency_graph.py
+│   ├── test_parser.py
+│   ├── test_integration.py
+│   └── test_test_runner.py
+├── benchmarks/                 # Performance benchmarks
+│   └── benchmark_suite.py
+└── test                        # Test runner script
 ```
 
 ## Important Patterns
@@ -222,28 +299,50 @@ Distinguish between:
 - Implement parallel testing with worktrees
 - Cache test results aggressively
 
-## Testing Strategy
+## Testing Infrastructure (Production Quality)
 
-Create test repositories with known breaking changes:
+**Coverage:** 99.9% (enforced by CI/CD)
+**Tests:** 215 test functions across 13 test files
+**Test Code:** 9,061 lines (2.3x more than source code)
 
-```
-test-repo-simple/
-  - Single commit, 5 files changed
-  - File 3, hunk 2 breaks tests
-  - Expected: 7 iterations to find
+### Test Categories
 
-test-repo-dependencies/
-  - Changes with import dependencies
-  - Should handle without false positives
+1. **Unit Tests**: Test individual functions and classes in isolation
+   - Core bifurcation engine (`test_core.py`)
+   - Git operations (`test_git_ops.py`)
+   - Dependency analysis (`test_dependency_analyzer.py`, `test_dependency_graph.py`)
+   - Diff parsing (`test_parser.py`)
+   - Data models (`test_models.py`)
 
-test-repo-interaction/
-  - Two changes that only break together
-  - Should detect interaction
+2. **Integration Tests**: End-to-end workflows with temporary git repositories
+   - Full bifurcation sessions
+   - State persistence and resumption
+   - CLI command tests (`test_cli.py`)
 
-test-repo-multiple-breaks/
-  - Three independent breaking changes
-  - Should find all three with --find-more
-```
+3. **Multi-Language Tests**: Verify dependency detection for 7 languages
+   - Python (AST-based)
+   - C/C++, Rust, Go, Swift, Zig, Verilog (regex-based)
+
+4. **Edge Case Tests**:
+   - Error handling (build failures, test errors)
+   - Corrupt state files
+   - Submodule changes
+   - Interaction detection
+
+### CI/CD (GitHub Actions)
+
+- **test.yml**: Run tests on Python 3.12 and 3.13 with 99.9% coverage requirement
+- **lint.yml**: Ruff formatting and linting + type checking with ty
+- **build.yml**: Verify package builds
+- **release.yml**: Automated releases to PyPI
+
+### Pre-commit Hooks
+
+Automatically run on every commit:
+- Ruff formatter check
+- Ruff linter
+- Type checker (ty)
+- Pytest with coverage check
 
 ## When Adding New Features
 
@@ -255,19 +354,37 @@ test-repo-multiple-breaks/
 
 ## Language Choice
 
-**Not Yet Decided**. Candidates:
+**Python 3.12+** (Decided and Implemented ✅)
 
-- **Python**: Fast prototyping, good git libraries, easier string/parsing
-- **Rust**: Performance, safety, single binary distribution
-- **Go**: Good balance, easy distribution, reasonable git libraries
+**Why Python:**
+- Fast development and prototyping
+- Excellent git library (GitPython)
+- Easy string/regex parsing for multi-language analysis
+- AST parsing built-in for Python symbol extraction
+- Great testing ecosystem (pytest)
+- Type hints with Python 3.12+ syntax (PEP 695)
+- Modern tooling (uv, ruff, ty)
 
-## Git Integration
+**Key Dependencies:**
+- `gitpython >= 3.1.0` - Git operations
+- `click >= 8.1.0` - CLI framework
 
-The tool should feel like a native git command:
-- Installed as `git-bifurcate` (git will find it as `git bifurcate`)
-- Follows git conventions (state in `.git/`, similar CLI to `git bisect`)
-- Works with git hooks and configurations
-- Respects `.gitignore` and git attributes
+**Development Tools:**
+- `pytest >= 8.0.0` - Testing
+- `ruff >= 0.6.0` - Linting and formatting
+- `ty >= 0.0.5` - Type checking
+- `uv` - Package management
+
+## Git Integration (Implemented ✅)
+
+The tool feels like a native git command:
+- ✅ Installed as `git-bifurcate` (can be invoked as `git bifurcate`)
+- ✅ Follows git conventions (state in `.git/bifurcate-state.json`, similar CLI to `git bisect`)
+- ✅ Worktree-aware state file location
+- ✅ Uses GitPython for all git operations
+- ✅ Submodule support with automatic initialization
+- ✅ Temporary branch management for testing
+- ✅ Clean state management (reset cleans up properly)
 
 ## Key Insights from Design Phase
 
